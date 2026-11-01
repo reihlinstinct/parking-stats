@@ -356,36 +356,29 @@ class InteractiveMap28Test(unittest.TestCase):
     MAPPING = BuildCellsTest.MAPPING
 
     def test_fallback_number_registered_in_collision_boxes(self) -> None:
-        # Four cells at one point: name above, name below, then numbered
-        # fallbacks. Every placed piece - including the numbers - must be
-        # registered so later labels never overlap them.
-        mapping = {
-            "א": (31.7704, 35.2104),
-            "ב": (31.7704, 35.2104),
-            "ג": (31.7704, 35.2104),
-            "ד": (31.7704, 35.2104),
-        }
-        cells, _b, _u = heatmap.build_cells(
-            {"א": 40, "ב": 30, "ג": 20, "ד": 10}, mapping
-        )
-        self.assertEqual(len(cells), 1)
-        # Force four cells at distinct-but-identical positions instead:
+        # Five cells at one point: four name slots (above, below, both
+        # sides), then a numbered fallback. Every placed piece -
+        # including the number - must be registered so later labels
+        # never overlap it.
         cells = [
-            {"lat": 31.770, "lng": 35.210, "n": 40, "label": "אאאא"},
-            {"lat": 31.770, "lng": 35.210, "n": 30, "label": "בבבב"},
-            {"lat": 31.770, "lng": 35.210, "n": 20, "label": "גגגג"},
-            {"lat": 31.770, "lng": 35.210, "n": 10, "label": "דדדד"},
+            {"lat": 31.770, "lng": 35.210, "n": 50, "label": "אאאא"},
+            {"lat": 31.770, "lng": 35.210, "n": 40, "label": "בבבב"},
+            {"lat": 31.770, "lng": 35.210, "n": 30, "label": "גגגג"},
+            {"lat": 31.770, "lng": 35.210, "n": 20, "label": "דדדד"},
+            {"lat": 31.770, "lng": 35.210, "n": 10, "label": "הההה"},
         ]
         project, _bbox = heatmap._projection(cells)
-        _blobs, _overlay, placed = heatmap._render_cells(cells, project)
-        self.assertEqual(len(placed), 4)
-        # The third and fourth boxes are the fallback-number boxes of
-        # rows 3 and 4, next to the shared dot.
+        _blobs, overlay, placed = heatmap._render_cells(cells, project)
+        self.assertEqual(len(placed), 5)
+        # Four names and exactly one numbered fallback (row 5)...
+        self.assertEqual(sum("הההה" in o for o in overlay), 0)
+        import re as _re
+
+        self.assertTrue(any(_re.search(r">5</text>", o) for o in overlay))
+        # ...whose collision box is registered.
         gx, gy = project(31.770, 35.210)
-        radius3 = heatmap._radius(cells[2], 40)
-        radius4 = heatmap._radius(cells[3], 40)
-        self.assertIn(heatmap._fallback_box(gx, gy, radius3, 3), placed)
-        self.assertIn(heatmap._fallback_box(gx, gy, radius4, 4), placed)
+        radius5 = heatmap._radius(cells[4], 50)
+        self.assertIn(heatmap._fallback_box(gx, gy, radius5, 5), placed)
 
     def test_numbered_fallback_and_hash_column(self) -> None:
         # Equal counts: identical dots and label boxes, so the third
@@ -473,3 +466,95 @@ class ReviewLows30Test(unittest.TestCase):
         )
         self.assertIn(".controls[hidden]", page)  # beats display:flex w/o JS
         self.assertIn("user-select: none", page)  # drag-pan selects nothing
+
+
+class GradientOnly30Test(unittest.TestCase):
+    """#30: gradient-only heat, basemap over heat, top streets named."""
+
+    # The ten hottest cells, copied from the published aggregate
+    # public/data/heatmap.json (rounded ~111 m cells, counts, street
+    # names - all public on the Pages site).
+    REAL_CELLS: list[heatmap.Cell] = [
+        {"lat": 31.77, "lng": 35.212, "n": 320, "label": "הרב חיים ברלין / חרלפ"},
+        {"lat": 31.766, "lng": 35.21, "n": 246, "label": "הפורצים"},
+        {"lat": 31.766, "lng": 35.209, "n": 50, "label": "הפלמח"},
+        {"lat": 31.765, "lng": 35.211, "n": 28, "label": "כובשי קטמון"},
+        {"lat": 31.763, "lng": 35.212, "n": 19, "label": "בוסתנאי"},
+        {"lat": 31.757, "lng": 35.215, "n": 17, "label": "גנרל פייר קניג"},
+        {"lat": 31.772, "lng": 35.213, "n": 11, "label": "דרך עזה"},
+        {"lat": 31.753, "lng": 35.216, "n": 10, "label": "פועלי צדק"},
+        {"lat": 31.763, "lng": 35.214, "n": 7, "label": "חזקיהו המלך"},
+        {"lat": 31.792, "lng": 35.208, "n": 7, "label": "ירמיהו"},
+        {"lat": 31.761, "lng": 35.215, "n": 6, "label": "אלעזר המודעי"},
+        {"lat": 31.765, "lng": 35.21, "n": 6, "label": "הלה"},
+        {"lat": 31.79, "lng": 35.175, "n": 6, "label": "הקבלן"},
+        {"lat": 31.761, "lng": 35.205, "n": 6, "label": 'שדרות ש"י עגנון'},
+        {"lat": 31.738, "lng": 35.18, "n": 5, "label": "אודם"},
+        {"lat": 31.769, "lng": 35.212, "n": 5, "label": "איתמר בן אבי"},
+        {"lat": 31.771, "lng": 35.211, "n": 5, "label": "בן סרוק"},
+        {"lat": 31.785, "lng": 35.215, "n": 5, "label": "יפו"},
+    ]
+    REAL_TOP10 = REAL_CELLS[:10]
+    LINES = [
+        [(31.750, 35.205), (31.770, 35.212), (31.795, 35.218)],
+        [(31.766, 35.200), (31.766, 35.222)],
+    ]
+
+    def test_top10_all_named_in_default_view(self) -> None:
+        import re as _re
+
+        page = heatmap.build_heatmap_html(
+            list(self.REAL_CELLS), 0, 0, "now", basemap_lines=self.LINES
+        )
+        vx, vy, vw, vh = (
+            float(v)
+            for v in page.split('data-home="', 1)[1].split('"', 1)[0].split(",")
+        )
+        for i, cell in enumerate(self.REAL_CELLS, 1):
+            m = _re.search(
+                r'<text x="([\d.]+)" y="([\d.]+)"[^>]*>'
+                + _re.escape(cell["label"])
+                + "</text>",
+                page,
+            )
+            if i <= len(self.REAL_TOP10):
+                self.assertIsNotNone(m, f"row {i} {cell['label']} lost its name")
+            if m is None:
+                continue
+            ly = float(m.group(2))
+            # A label is either fully inside the view (its dot is in
+            # view) or fully outside it (appears when panned to) -
+            # never clipped across the edge.
+            half = len(cell["label"]) * 0.85 * (vw / 76)
+            lx = float(m.group(1))
+            box = (lx - half, ly - 2.0 * vw / 76, lx + half, ly + 0.4 * vw / 76)
+            inside = (
+                vx <= box[0]
+                and box[2] <= vx + vw
+                and vy <= box[1]
+                and box[3] <= vy + vh
+            )
+            outside = not (
+                box[0] < vx + vw and box[2] > vx and box[1] < vy + vh and box[3] > vy
+            )
+            self.assertTrue(
+                inside or outside,
+                f"{cell['label']} label clips across the view edge",
+            )
+            # No numbered fallback for any top-10 row.
+            self.assertIsNone(
+                _re.search(r"<text [^>]*>%d</text>" % i, page),
+                f"row {i} fell back to its number",
+            )
+
+    def test_gradient_only_structure(self) -> None:
+        page = heatmap.build_heatmap_html(
+            list(self.REAL_CELLS), 0, 0, "now", basemap_lines=self.LINES
+        )
+        svg = page.split('<svg id="map"', 1)[1].split("</svg>", 1)[0]
+        # No solid marker dots; only blurred gradient blobs.
+        self.assertNotIn('fill-opacity="0.95"', svg)
+        self.assertIn("feGaussianBlur", svg)
+        # Draw order: heat blobs, then the basemap over them, then labels.
+        self.assertLess(svg.index("<circle"), svg.index("<path"))
+        self.assertLess(svg.index("<path"), svg.index("<text"))

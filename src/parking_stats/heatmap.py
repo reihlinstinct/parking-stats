@@ -337,16 +337,26 @@ def _render_cells(
         name = escape(cell["label"])
         half = len(cell["label"]) * 0.85 * scale
         height = 2.0 * scale
+        # Label offsets are decoupled from the blob radius (#30): with no
+        # marker dot, the name sits at a fixed distance from the cell
+        # point, so large hot blobs cannot push every candidate out of
+        # the cropped view. Side positions give dense clusters a way to
+        # keep every hot street named.
         candidates = [
-            (gx, gy - radius - 0.6 * scale),
-            (gx, gy + radius + 2.1 * scale),
-            (gx, gy - radius - 2.8 * scale),
-            (gx, gy + radius + 4.3 * scale),
+            (gx, gy - 2.2 * scale),
+            (gx, gy + 3.2 * scale),
+            (gx, gy - 4.4 * scale),
+            (gx, gy + 5.4 * scale),
+            (gx + half + 1.4 * scale, gy + 0.6 * scale),
+            (gx - half - 1.4 * scale, gy + 0.6 * scale),
         ]
         # Cells inside the initial view keep their labels inside it too:
         # a name that would clip at the view's edge falls through to a
-        # position within the view (typically below the dot) so the
-        # hottest streets stay named in the default view (#30).
+        # position within the view so the hottest streets stay named in
+        # the default view (#30). Cells OUTSIDE the view get a label
+        # that stays fully outside it as well - a floating name whose
+        # dot is not visible reads as a map bug - and it appears when
+        # the map is panned there.
         in_view = view is None or (
             view[0] <= gx <= view[0] + view[2] and view[1] <= gy <= view[1] + view[3]
         )
@@ -355,17 +365,19 @@ def _render_cells(
             box = (cx - half, cy - height, cx + half, cy + 0.4)
             if cx - half < 0 or cx + half > _GRID_W:
                 continue
-            if (
-                in_view
-                and view is not None
-                and not (
+            if view is not None:
+                box_in = (
                     view[0] <= box[0]
                     and box[2] <= view[0] + view[2]
                     and view[1] <= box[1]
                     and box[3] <= view[1] + view[3]
                 )
-            ):
-                continue
+                if in_view and not box_in:
+                    continue
+                if not in_view and _overlaps(
+                    box, [(view[0], view[1], view[0] + view[2], view[1] + view[3])]
+                ):
+                    continue
             if not _overlaps(box, placed):
                 chosen = (cx, cy)
                 break
