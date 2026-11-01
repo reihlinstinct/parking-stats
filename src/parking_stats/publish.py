@@ -19,6 +19,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from . import heatmap as heatmap_mod
 from .charts import hbar_chart, vbar_chart
 from .privacy_scan import PLATES_SECTION_RULES, scan_lines
 
@@ -135,6 +136,7 @@ PAGE = """<!DOCTYPE html>
 <li><a href="data/categories.csv">קטגוריות</a></li>
 <li><a href="data/streets.csv">רחובות</a></li>
 {plates_link}
+{heatmap_link}
 </ul>
 </section>
 </main>
@@ -268,6 +270,11 @@ def build_index(input_dir: Path, label: str, updated: str) -> str:
     plates_link = (
         '<li><a href="data/plates.csv">רכבים חוזרים</a></li>' if plates else ""
     )
+    heatmap_link = (
+        '<li><a href="heatmap.html">מפת חום של מוקדים חמים</a></li>'
+        if summary.get("hotspots")
+        else ""
+    )
     return PAGE.format(
         css=CSS,
         cards="".join(cards),
@@ -276,6 +283,7 @@ def build_index(input_dir: Path, label: str, updated: str) -> str:
         streets_chart=hbar_chart(streets[:6]),
         plates_section=_plates_section(plates),
         plates_link=plates_link,
+        heatmap_link=heatmap_link,
         label=html.escape(label),
         updated=html.escape(updated),
     )
@@ -344,6 +352,29 @@ def check_shape(input_dir: Path) -> list[str]:
     return findings
 
 
+def _build_heatmap(input_dir: Path, updated: str) -> dict[str, str] | None:
+    """Render heatmap.html + heatmap.json from floored hotspots (#1).
+
+    Returns {} when there is nothing to map (stale copies are removed by
+    the caller), None on a data error. Coordinates come only from the
+    committed geocoding mapping; the build stays offline.
+    """
+    try:
+        summary = json.loads((input_dir / "summary.json").read_text(encoding="utf-8"))
+        hotspots = summary.get("hotspots") or {}
+        if not isinstance(hotspots, dict) or not hotspots:
+            return {}
+        mapping = heatmap_mod.load_mapping()
+        points, _below, unmapped = heatmap_mod.build_points(hotspots, mapping)
+        return {
+            "heatmap.html": heatmap_mod.build_heatmap_html(),
+            "heatmap.json": heatmap_mod.build_heatmap_json(points, unmapped, updated),
+        }
+    except (ValueError, KeyError, TypeError, OSError) as exc:
+        print(f"publish: heat map error: {exc}", file=sys.stderr)
+        return None
+
+
 def publish(input_dir: Path, public_dir: Path, label: str) -> int:
     findings = scan_output(input_dir)
     # The label is free text that lands on the landing page; scan it with
@@ -369,8 +400,24 @@ def publish(input_dir: Path, public_dir: Path, label: str) -> int:
         for finding in index_findings:
             print(f"publish: refused: {finding}", file=sys.stderr)
         return 1
+    heatmap_files = _build_heatmap(input_dir, updated)
+    if heatmap_files is None:
+        print("publish: refused: heat map build failed", file=sys.stderr)
+        return 1
+    for name, text in heatmap_files.items():
+        findings = [str(f) for f in scan_lines(name, text.splitlines(), set())]
+        if findings:
+            for finding in findings:
+                print(f"publish: refused: {finding}", file=sys.stderr)
+            return 1
     data_dir = public_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
+    for name, text in heatmap_files.items():
+        target = data_dir / name if name.endswith(".json") else public_dir / name
+        target.write_text(text, encoding="utf-8")
+    for stale in (public_dir / "heatmap.html", data_dir / "heatmap.json"):
+        if not heatmap_files and stale.exists():
+            stale.unlink()
     shutil.copy2(input_dir / "report.html", public_dir / "report.html")
     for name in DATA_FILES:
         shutil.copy2(input_dir / name, data_dir / name)
