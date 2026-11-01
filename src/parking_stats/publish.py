@@ -349,6 +349,9 @@ def check_shape(input_dir: Path) -> list[str]:
             payload = json.loads(summary.read_text(encoding="utf-8"))
         except ValueError:
             payload = {}
+        if not isinstance(payload, dict):
+            findings.append("summary.json: top level must be a JSON object")
+            payload = {}
         keys = set(payload)
         unexpected = keys - EXPECTED_SUMMARY_KEYS
         if unexpected:

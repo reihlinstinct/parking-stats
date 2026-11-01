@@ -135,6 +135,29 @@ class RepeatPlatesCountTest(unittest.TestCase):
             self.assertFalse(public.exists())
 
 
+class NonObjectSummaryTest(unittest.TestCase):
+    """#19: a valid-JSON non-object summary.json is a finding, not a crash."""
+
+    def _code(self, raw: str) -> int:
+        files = dict(FILES)
+        files["summary.json"] = raw
+        with tempfile.TemporaryDirectory() as tmp:
+            public = Path(tmp) / "public"
+            return publish(make_input(files), public, "x")
+
+    def test_array_summary_is_refused_without_raising(self):
+        self.assertEqual(self._code("[1, 2]\n"), 1)
+
+    def test_string_summary_is_refused_without_raising(self):
+        self.assertEqual(self._code('"just a string"\n'), 1)
+
+    def test_null_summary_is_refused_without_raising(self):
+        self.assertEqual(self._code("null\n"), 1)
+
+    def test_invalid_json_still_refused(self):
+        self.assertEqual(self._code("{not json\n"), 1)
+
+
 class PublishPlatesTest(unittest.TestCase):
     def test_publish_with_plates_csv_copies_and_renders_section(self):
         input_dir = make_input({**FILES, "plates.csv": PLATES_CSV})
