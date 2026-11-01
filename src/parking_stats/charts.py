@@ -23,7 +23,7 @@ def vbar_chart(rows: list[tuple[str, int]], *, color: str = BAR) -> str:
     """Vertical bars, e.g. monthly counts; labels below the axis."""
     if not rows:
         return ""
-    width, height, pad_b, pad_t = 560, 180, 34, 10
+    width, height, pad_b, pad_t = 560, 180, 34, 18
     top = max(count for _, count in rows) or 1
     slot = width / len(rows)
     bar_w = max(6.0, slot * 0.62)
@@ -63,7 +63,8 @@ def hbar_chart(rows: list[tuple[str, int]], *, color: str = BAR_ALT) -> str:
         return ""
     row_h = 30
     width = 560
-    label_w = 150
+    label_w = 220
+    max_label_chars = 30
     height = row_h * len(rows) + 8
     top = max(count for _, count in rows) or 1
     span = width - label_w - 50
@@ -74,9 +75,13 @@ def hbar_chart(rows: list[tuple[str, int]], *, color: str = BAR_ALT) -> str:
     for i, (label, count) in enumerate(rows):
         y = i * row_h + 6
         w = max(2.0, span * count / top)
+        # Truncate long labels so they stay inside the reserved column and
+        # never collide with the count sitting left of a short bar; the
+        # full label is on the bar's <title>.
+        shown = label if len(label) <= max_label_chars else label[: max_label_chars - 1] + "…"
         parts.append(
-            f'<text x="{width - 4}" y="{y + 15}" text-anchor="end" font-size="12" '
-            f'fill="{INK}">{_e(label)}</text>'
+            f'<text x="{width - 4}" y="{y + 15}" direction="rtl" '
+            f'text-anchor="start" font-size="12" fill="{INK}">{_e(shown)}</text>'
         )
         x = width - label_w - w
         parts.append(

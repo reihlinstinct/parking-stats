@@ -34,6 +34,30 @@ class ChartTest(unittest.TestCase):
         self.assertIn('viewBox="0,0,', svg)
         self.assertNotIn('viewBox="0 0', svg)
 
+    def test_hbar_labels_anchor_inside_right_column(self):
+        # RTL text anchored "end" at the right edge runs off the viewBox;
+        # force direction="rtl" + start anchor so glyphs extend leftward.
+        svg = hbar_chart([("חניה אסורה - חניה על מדרכת", 7)])
+        self.assertIn('direction="rtl"', svg)
+        self.assertIn('text-anchor="start"', svg)
+
+    def test_hbar_long_labels_are_truncated(self):
+        label = "א" * 40
+        svg = hbar_chart([(label, 5)])
+        self.assertNotIn(label + "<", svg)
+        self.assertIn("א" * 29 + "…", svg)
+
+    def test_vbar_tallest_count_label_stays_on_canvas(self):
+        # The count above the tallest bar must not clip at the top edge:
+        # its baseline sits at pad_t - 4, which must leave room for the
+        # cap height of an 11px font.
+        import re
+
+        svg = vbar_chart([("a", 1), ("b", 100)])
+        ys = [float(y) for y in re.findall(r'y="([\d.]+)"[^>]*font-size="11"', svg)]
+        self.assertTrue(ys, "no count labels found")
+        self.assertGreaterEqual(min(ys), 8.0)
+
 
 if __name__ == "__main__":
     unittest.main()
