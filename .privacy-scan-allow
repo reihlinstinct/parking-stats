@@ -1,0 +1,8 @@
+# Synthetic detection samples live in the scanner's tests; only the
+# raw-export-key rule is waived there, plates/phones still apply.
+tests/test_privacy_scan.py raw-export-key
+# Package metadata and argparse both use a field literally named
+# "description"; these files contain no raw exports, waive only that rule.
+pyproject.toml raw-export-key
+src/parking_stats/privacy_scan.py raw-export-key
+src/parking_stats/publish.py raw-export-key

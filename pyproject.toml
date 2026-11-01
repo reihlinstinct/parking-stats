@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parking-stats"
+version = "0.1.0"
+description = "Aggregate-only public statistics from Jerusalem 106 parking reports"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+[project.scripts]
+parking-stats-privacy-scan = "parking_stats.privacy_scan:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+# Settings are explicit so a ruff upgrade cannot silently change them;
+# CI pins the ruff version (tests.yml, job "ruff").
+target-version = "py311"
+line-length = 88
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["parking_stats"]
+
+[tool.mypy]
+mypy_path = "src"
+strict = true
