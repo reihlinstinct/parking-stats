@@ -92,9 +92,12 @@ def hbar_chart(rows: list[tuple[str, int]], *, color: str = BAR_ALT) -> str:
             f'<rect x="{x:.1f}" y="{y}" width="{w:.1f}" height="20" rx="4" '
             f'fill="{color}"><title>{_e(label)}: {count}</title></rect>'
         )
+        # direction="ltr": the SVG inherits direction:rtl from the page,
+        # and for weak-direction digits "end" would anchor the LEFT edge,
+        # painting the count over the bar.
         parts.append(
-            f'<text x="{x - 6:.1f}" y="{y + 15}" text-anchor="end" font-size="12" '
-            f'fill="{INK}">{count}</text>'
+            f'<text x="{x - 6:.1f}" y="{y + 15}" direction="ltr" '
+            f'text-anchor="end" font-size="12" fill="{INK}">{count}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)

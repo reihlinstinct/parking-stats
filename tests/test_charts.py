@@ -58,6 +58,15 @@ class ChartTest(unittest.TestCase):
         self.assertTrue(ys, "no count labels found")
         self.assertGreaterEqual(min(ys), 8.0)
 
+    def test_hbar_counts_forced_ltr_so_they_clear_the_bar(self):
+        # The page is dir=rtl; without an explicit reset the count's
+        # "end" anchor flips and digits paint over the bar.
+        svg = hbar_chart([("חניה", 326)])
+        self.assertIn('direction="ltr"', svg)
+        count_text = [s for s in svg.split("<text") if ">326</text>" in s][0]
+        self.assertIn('direction="ltr"', count_text)
+        self.assertIn('text-anchor="end"', count_text)
+
 
 if __name__ == "__main__":
     unittest.main()
