@@ -377,7 +377,7 @@ class InteractiveMap28Test(unittest.TestCase):
             {"lat": 31.770, "lng": 35.210, "n": 10, "label": "דדדד"},
         ]
         project, _bbox = heatmap._projection(cells)
-        _parts, placed = heatmap._render_cells(cells, project)
+        _blobs, _overlay, placed = heatmap._render_cells(cells, project)
         self.assertEqual(len(placed), 4)
         # The third and fourth boxes are the fallback-number boxes of
         # rows 3 and 4, next to the shared dot.

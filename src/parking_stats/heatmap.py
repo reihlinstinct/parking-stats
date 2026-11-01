@@ -274,7 +274,9 @@ def build_heatmap_json(
 
 
 def _radius(cell: Cell, max_n: int) -> float:
-    return round(1.3 + 2.4 * math.sqrt(cell["n"] / max_n), 2)
+    # Wide soft blobs that overlap into a continuous heat field; the
+    # gradient-only design has no discrete dots (#30, user steering).
+    return round(2.4 + 2.6 * math.sqrt(cell["n"] / max_n), 2)
 
 
 def _overlaps(box: _Box, placed: list[_Box]) -> bool:
@@ -289,7 +291,7 @@ def _fallback_box(
 ) -> _Box:
     """Collision box of a numbered fallback label next to its dot."""
     half = len(str(index)) * 0.85 * scale
-    y = gy - radius - 0.4 * scale
+    y = gy + 0.5 * scale
     return (gx - half, y - 2.0 * scale, gx + half, y + 0.4 * scale)
 
 
@@ -298,8 +300,12 @@ def _render_cells(
     project: Callable[[float, float], tuple[float, float]],
     scale: float = 1.0,
     view: tuple[float, float, float, float] | None = None,
-) -> tuple[list[str], list[_Box]]:
-    """Emit circle and label SVG fragments; return them with the boxes.
+) -> tuple[list[str], list[str], list[_Box]]:
+    """Emit heat blobs, overlay (dots + labels) and collision boxes.
+
+    Returns (blobs, overlay, placed): the basemap is drawn between the
+    blobs and the overlay so street lines stay readable through the
+    heat field (#30) while dots and labels stay on top.
 
     A cell gets its street name directly on the map only when a
     candidate position fits without overlapping an already-placed label
@@ -309,7 +315,8 @@ def _render_cells(
     too, so no label is ever hidden under another label or a number.
     """
     max_n = max(c["n"] for c in cells)
-    parts: list[str] = []
+    blobs: list[str] = []
+    overlay: list[str] = []
     placed: list[_Box] = []
     labels: list[str] = []
     for index, cell in enumerate(cells, 1):
@@ -320,15 +327,13 @@ def _render_cells(
         radius = _radius(cell, max_n)
         gx, gy = project(cell["lat"], cell["lng"])
         title = escape(f"{cell['label']}: {cell['n']} דיווחים", {'"': "&quot;"})
-        parts.append(
+        blobs.append(
             f'<circle cx="{gx:.2f}" cy="{gy:.2f}" r="{radius}" '
             f'fill="url(#g{bucket})" filter="url(#soft)">'
             f"<title>{title}</title></circle>"
         )
-        parts.append(
-            f'<circle cx="{gx:.2f}" cy="{gy:.2f}" r="0.45" '
-            f'fill="{_HEAT_RAMP[bucket]}" fill-opacity="0.95"/>'
-        )
+        # No marker dot: the heat is gradient-only (user steering #30);
+        # the cell position is readable from its label or row number.
         name = escape(cell["label"])
         half = len(cell["label"]) * 0.85 * scale
         height = 2.0 * scale
@@ -381,13 +386,13 @@ def _render_cells(
         else:
             placed.append(_fallback_box(gx, gy, radius, index, scale))
             labels.append(
-                f'<text x="{gx:.2f}" y="{gy - radius - 0.4 * scale:.2f}" '
+                f'<text x="{gx:.2f}" y="{gy + 0.5 * scale:.2f}" '
                 f'text-anchor="middle" font-size="{1.4 * scale:.2f}" '
                 f'fill="#111" stroke="#fff" stroke-width="{0.28 * scale:.2f}" '
                 f'paint-order="stroke">{index}</text>'
             )
-    parts.extend(labels)
-    return parts, placed
+    overlay.extend(labels)
+    return blobs, overlay, placed
 
 
 def _initial_view(
@@ -438,13 +443,14 @@ def _map_svg(cells: list[Cell], basemap_path: str) -> tuple[str, int]:
     (vx, vy, vw, vh), outside = _initial_view(cells, project)
     defs = [
         "<defs>",
-        '<filter id="soft"><feGaussianBlur stdDeviation="0.55"/></filter>',
+        '<filter id="soft" x="-60%" y="-60%" width="220%" height="220%">'
+        '<feGaussianBlur stdDeviation="1.1"/></filter>',
     ]
     for i, colour in enumerate(_HEAT_RAMP):
         defs.append(
             f'<radialGradient id="g{i}">'
-            f'<stop offset="0%" stop-color="{colour}" stop-opacity="0.9"/>'
-            f'<stop offset="70%" stop-color="{colour}" stop-opacity="0.45"/>'
+            f'<stop offset="0%" stop-color="{colour}" stop-opacity="0.55"/>'
+            f'<stop offset="60%" stop-color="{colour}" stop-opacity="0.28"/>'
             f'<stop offset="100%" stop-color="{colour}" stop-opacity="0"/>'
             "</radialGradient>"
         )
@@ -462,21 +468,23 @@ def _map_svg(cells: list[Cell], basemap_path: str) -> tuple[str, int]:
         "".join(defs),
         f'<rect width="{_GRID_W:.0f}" height="{_GRID_H:.0f}" fill="#f7f5f0"/>',
     ]
-    if basemap_path:
-        parts.append(
-            # Non-scaling stroke: the basemap keeps a constant screen
-            # width at every zoom level instead of thickening on zoom-in.
-            f'<path d="{basemap_path}" fill="none" stroke="#c9c4bb"'
-            ' stroke-width="1.1" vector-effect="non-scaling-stroke"'
-            ' stroke-linecap="round" stroke-linejoin="round"/>'
-        )
     # Label metrics scale with the initial viewBox: text renders at a
     # readable size in the cropped view and grows/shrinks with zoom;
     # the dots, which represent geography, keep their grid size.
-    cell_parts, _placed = _render_cells(
+    blobs, overlay, _placed = _render_cells(
         cells, project, scale=vw / _GRID_W, view=(vx, vy, vw, vh)
     )
-    parts.extend(cell_parts)
+    parts.extend(blobs)
+    if basemap_path:
+        # Drawn over the (softened) heat blobs so the dots never hide
+        # the streets; non-scaling stroke keeps a constant screen width
+        # at every zoom level.
+        parts.append(
+            f'<path d="{basemap_path}" fill="none" stroke="#a8a29a"'
+            ' stroke-width="1.1" vector-effect="non-scaling-stroke"'
+            ' stroke-linecap="round" stroke-linejoin="round"/>'
+        )
+    parts.extend(overlay)
     parts.append("</svg>")
     return "".join(parts), outside
 
