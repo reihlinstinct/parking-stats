@@ -14,17 +14,19 @@ import csv
 import datetime as dt
 import html
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
 
 from .charts import hbar_chart, vbar_chart
-from .privacy_scan import scan_lines
+from .privacy_scan import PLATES_SECTION_RULES, scan_lines
 
 EXPECTED_COLUMNS: dict[str, tuple[str, ...]] = {
     "monthly.csv": ("month", "reports"),
     "categories.csv": ("category", "reports"),
     "streets.csv": ("street", "reports"),
+    "plates.csv": ("plate", "reports"),
 }
 EXPECTED_SUMMARY_KEYS = {
     "schema_version",
@@ -50,6 +52,14 @@ REQUIRED = (
     "report.html",
 )
 DATA_FILES = ("summary.json", "monthly.csv", "categories.csv", "streets.csv")
+# Optional: the helper's repeat-plates aggregate. Published only when the
+# build emits it; a stale published copy is removed when it does not.
+OPTIONAL_DATA = ("plates.csv",)
+# Canonical dashed standard plates (7 or 8 digits) and a count of at
+# least the repeat threshold the aggregate is approved for.
+_PLATE_ROW = re.compile(r"^\d{2}-\d{3}-\d{2}$|^\d{3}-\d{2}-\d{3}$")
+_COUNT_ROW = re.compile(r"^\d+$")
+MIN_REPEAT_REPORTS = 3
 
 CSS = """
 :root { color-scheme: light; }
@@ -89,6 +99,9 @@ ul.links a {
   text-decoration: none; font-weight: 600;
 }
 ul.links a:focus-visible, ul.links a:hover { background: #dbeafe; }
+table { border-collapse: collapse; margin: .2rem 0 .4rem; }
+th, td { padding: .35rem .8rem; border-bottom: 1px solid #e2e8f0; text-align: right; }
+th { color: #1e3a8a; font-size: .9rem; }
 footer { text-align: center; color: #475569; font-size: .85rem; padding: 0 1rem 2rem; }
 """
 
@@ -104,13 +117,15 @@ PAGE = """<!DOCTYPE html>
 <header>
 <h1>דיווחי 106 - ירושלים</h1>
 <p>כל הנתונים כאן מצטברים בלבד: ספירות לפי חודש, שבוע, קטגוריה, רחוב
-ושכונה - ללא נתונים גולמיים, לוחיות רישוי או שמות.</p>
+ושכונה - ללא נתונים גולמיים או שמות. לוחיות רישוי מוצגות רק לרכבים
+שדווחו שלוש פעמים ומעלה, יחד עם מספר הדיווחים בלבד.</p>
 </header>
 <main>
 <div class="cards">{cards}</div>
 <section><h2>דיווחים לפי חודש (12 האחרונים)</h2>{monthly_chart}</section>
 <section><h2>קטגוריות מובילות</h2>{categories_chart}</section>
 <section><h2>רחובות מובילים</h2>{streets_chart}</section>
+{plates_section}
 <section><h2>הדוח המלא והנתונים</h2>
 <ul class="links">
 <li><a href="report.html">הדוח המלא עם כל הגרפים</a></li>
@@ -118,6 +133,7 @@ PAGE = """<!DOCTYPE html>
 <li><a href="data/monthly.csv">טבלה חודשית</a></li>
 <li><a href="data/categories.csv">קטגוריות</a></li>
 <li><a href="data/streets.csv">רחובות</a></li>
+{plates_link}
 </ul>
 </section>
 </main>
@@ -175,6 +191,45 @@ def _card(number: str, caption: str) -> str:
     )
 
 
+def _plates_section(plates: list[tuple[str, int]]) -> str:
+    """Repeat-plates block: plate + report count only, inside the markers
+    the privacy scanner's section:plates directive recognises."""
+    if not plates:
+        return ""
+    rows = "".join(
+        '<tr><td dir="ltr">' + html.escape(plate) + "</td><td>"
+        f"{count} דיווחים</td></tr>"
+        for plate, count in plates
+    )
+    return (
+        "<section><h2>רכבים חוזרים</h2>\n"
+        "<p>רכבים שדווחו שלוש פעמים ומעלה; מוצגים מספר הרישוי ומספר "
+        "הדיווחים בלבד.</p>\n"
+        + "<!-- repeat-plates:begin -->\n"
+        + "<table><thead><tr><th>מספר רישוי</th><th>דיווחים</th></tr></thead>"
+        + "<tbody>"
+        + rows
+        + "</tbody></table>\n"
+        + "<!-- repeat-plates:end -->\n"
+        + "</section>"
+    )
+
+
+def _read_plates(input_dir: Path) -> list[tuple[str, int]]:
+    path = input_dir / "plates.csv"
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.reader(handle))
+    plates: list[tuple[str, int]] = []
+    for plate, count in rows[1:]:
+        value = int(count)
+        if value < MIN_REPEAT_REPORTS:
+            raise ValueError("plates.csv: count below repeat threshold")
+        plates.append((plate, value))
+    return plates
+
+
 def build_index(input_dir: Path, label: str, updated: str) -> str:
     """Render the landing page from the aggregate output files."""
     summary = json.loads((input_dir / "summary.json").read_text(encoding="utf-8"))
@@ -202,12 +257,18 @@ def build_index(input_dir: Path, label: str, updated: str) -> str:
     if isinstance(median_days, (int, float)):
         cards.append(_card(_median_text(float(median_days)), "זמן טיפול חציוני"))
 
+    plates = _read_plates(input_dir)
+    plates_link = (
+        '<li><a href="data/plates.csv">רכבים חוזרים</a></li>' if plates else ""
+    )
     return PAGE.format(
         css=CSS,
         cards="".join(cards),
         monthly_chart=vbar_chart(monthly[-12:]),
         categories_chart=hbar_chart(categories[:6]),
         streets_chart=hbar_chart(streets[:6]),
+        plates_section=_plates_section(plates),
+        plates_link=plates_link,
         label=html.escape(label),
         updated=html.escape(updated),
     )
@@ -223,6 +284,17 @@ def scan_output(input_dir: Path) -> list[str]:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         findings.extend(str(f) for f in scan_lines(name, text.splitlines(), set()))
+    plates_path = input_dir / "plates.csv"
+    if plates_path.exists():
+        text = plates_path.read_text(encoding="utf-8", errors="replace")
+        # plates.csv is the one approved plate carrier: plate rules are
+        # waived, every other rule still guards it.
+        findings.extend(
+            str(f)
+            for f in scan_lines(
+                "plates.csv", text.splitlines(), set(PLATES_SECTION_RULES)
+            )
+        )
     findings.extend(check_shape(input_dir))
     return findings
 
@@ -238,9 +310,21 @@ def check_shape(input_dir: Path) -> list[str]:
         if not path.exists():
             continue
         with path.open(encoding="utf-8", newline="") as handle:
-            header = tuple(next(csv.reader(handle), ()))
+            rows = list(csv.reader(handle))
+        header = tuple(rows[0]) if rows else ()
         if header != expected:
             findings.append(f"{name}: unexpected columns {header!r}")
+            continue
+        if name == "plates.csv":
+            for row in rows[1:]:
+                if (
+                    len(row) != 2
+                    or not _PLATE_ROW.match(row[0])
+                    or not _COUNT_ROW.match(row[1])
+                    or int(row[1]) < MIN_REPEAT_REPORTS
+                ):
+                    findings.append("plates.csv: non-canonical row")
+                    break
     summary = input_dir / "summary.json"
     if summary.exists():
         try:
@@ -269,7 +353,10 @@ def publish(input_dir: Path, public_dir: Path, label: str) -> int:
         print(f"publish: refused: index build failed: {exc}", file=sys.stderr)
         return 1
     index_findings = [
-        str(f) for f in scan_lines("index.html", index_text.splitlines(), set())
+        str(f)
+        for f in scan_lines(
+            "index.html", index_text.splitlines(), set(), allow_plates_section=True
+        )
     ]
     if index_findings:
         for finding in index_findings:
@@ -280,8 +367,17 @@ def publish(input_dir: Path, public_dir: Path, label: str) -> int:
     shutil.copy2(input_dir / "report.html", public_dir / "report.html")
     for name in DATA_FILES:
         shutil.copy2(input_dir / name, data_dir / name)
+    copied = len(REQUIRED)
+    for name in OPTIONAL_DATA:
+        src = input_dir / name
+        dst = data_dir / name
+        if src.exists():
+            shutil.copy2(src, dst)
+            copied += 1
+        elif dst.exists():
+            dst.unlink()
     (public_dir / "index.html").write_text(index_text, encoding="utf-8")
-    print(f"publish: {len(REQUIRED)} files -> {public_dir} ({label})")
+    print(f"publish: {copied} files -> {public_dir} ({label})")
     return 0
 
 

@@ -6,3 +6,9 @@ tests/test_privacy_scan.py raw-export-key
 pyproject.toml raw-export-key
 src/parking_stats/privacy_scan.py raw-export-key
 src/parking_stats/publish.py raw-export-key
+# Generated repeat-plates aggregate: the one approved plate carrier.
+# Only the plate rules are waived; phones and raw-export keys still apply.
+public/data/plates.csv plate plate-compact
+# Generated landing page: plate rules are waived only between balanced
+# repeat-plates markers; the rest of the page stays fully scanned.
+public/index.html section:plates

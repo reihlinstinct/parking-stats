@@ -33,6 +33,15 @@ rule-scoped form so other rules still guard the file. Use it for files
 that carry synthetic detection samples and for known-safe collisions
 such as package metadata fields named ``description``.
 
+The directive ``section:plates`` waives only the ``plate`` and
+``plate-compact`` rules, and only on lines strictly between one
+``<!-- repeat-plates:begin -->`` / ``<!-- repeat-plates:end -->``
+marker pair in that file. Anything else - no pair, extra markers, a
+reversed pair - waives nothing, so a broken section fails closed; the
+marker lines themselves are always scanned strictly. It exists for the
+generated landing page's repeat-plates section, the single approved
+place where plates appear.
+
 Known limitations, accepted by design: matching is per line, so a plate
 or key split across two lines is not detected; and the compact plate
 rule also matches bare 7-8 digit numbers (aggregate outputs never
@@ -110,6 +119,13 @@ RULES: dict[str, re.Pattern[str]] = {
 ALLOW_FILE = ".privacy-scan-allow"
 TEXT_CHUNK = 1 << 20
 
+# Marker pair delimiting the repeat-plates section of the generated
+# landing page; the section:plates directive waives plate rules there.
+PLATES_SECTION_BEGIN = "<!-- repeat-plates:begin -->"
+PLATES_SECTION_END = "<!-- repeat-plates:end -->"
+PLATES_SECTION_RULES = frozenset({"plate", "plate-compact"})
+SECTION_DIRECTIVE = "section:plates"
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -135,7 +151,7 @@ def load_allowlist(root: Path) -> dict[str, set[str]]:
             continue
         parts = line.split()
         path, rules = parts[0], set(parts[1:])
-        unknown = rules - set(RULES)
+        unknown = rules - set(RULES) - {SECTION_DIRECTIVE}
         if unknown:
             raise ValueError(
                 f"{ALLOW_FILE}: unknown rule(s) for {path}: {sorted(unknown)}"
@@ -159,20 +175,42 @@ def is_text(data: bytes) -> bool:
     return b"\x00" not in data[:TEXT_CHUNK]
 
 
+def plates_section_lines(lines: list[str]) -> set[int]:
+    """1-based line numbers strictly between one balanced marker pair.
+
+    Exactly one begin and one end, begin before end, waive the lines
+    between them (marker lines stay strict). Anything else waives
+    nothing (fail closed).
+    """
+    begins = [n for n, line in enumerate(lines, 1) if PLATES_SECTION_BEGIN in line]
+    ends = [n for n, line in enumerate(lines, 1) if PLATES_SECTION_END in line]
+    if len(begins) != 1 or len(ends) != 1 or begins[0] >= ends[0]:
+        return set()
+    return set(range(begins[0] + 1, ends[0]))
+
+
 def scan_lines(
-    relpath: str, lines: Iterable[str], skip_rules: set[str]
+    relpath: str,
+    lines: Iterable[str],
+    skip_rules: set[str],
+    allow_plates_section: bool = False,
 ) -> list[Finding]:
     """Scan normalised text lines; used for files and generated content."""
+    materialised = list(lines)
+    waived = plates_section_lines(materialised) if allow_plates_section else set()
     findings = []
-    for lineno, line in enumerate(lines, 1):
+    for lineno, line in enumerate(materialised, 1):
+        skipped = skip_rules | (PLATES_SECTION_RULES if lineno in waived else set())
         normalised = normalize_line(line)
         for rule, pattern in RULES.items():
-            if rule not in skip_rules and pattern.search(normalised):
+            if rule not in skipped and pattern.search(normalised):
                 findings.append(Finding(relpath, lineno, rule))
     return findings
 
 
-def scan_file(root: Path, relpath: str, skip_rules: set[str]) -> list[Finding]:
+def scan_file(
+    root: Path, relpath: str, skip_rules: set[str], allow_plates_section: bool = False
+) -> list[Finding]:
     try:
         data = (root / relpath).read_bytes()
     except OSError:
@@ -180,7 +218,10 @@ def scan_file(root: Path, relpath: str, skip_rules: set[str]) -> list[Finding]:
     if not is_text(data):
         return []
     return scan_lines(
-        relpath, data.decode("utf-8", errors="replace").splitlines(), skip_rules
+        relpath,
+        data.decode("utf-8", errors="replace").splitlines(),
+        skip_rules,
+        allow_plates_section,
     )
 
 
@@ -192,7 +233,15 @@ def scan(root: Path) -> list[Finding]:
             continue
         if relpath in allow and not allow[relpath]:
             continue
-        findings.extend(scan_file(root, relpath, allow.get(relpath, set())))
+        granted = allow.get(relpath, set())
+        findings.extend(
+            scan_file(
+                root,
+                relpath,
+                granted & set(RULES),
+                SECTION_DIRECTIVE in granted,
+            )
+        )
     return findings
 
 

@@ -12,7 +12,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parking_stats.privacy_scan import RULES, main, normalize_line, scan
+from parking_stats.privacy_scan import (
+    RULES,
+    load_allowlist,
+    main,
+    normalize_line,
+    scan,
+    scan_lines,
+)
 
 PLATE = "12" + "-345-" + "67"
 PHONE = "050" + "-1234" + "567"
@@ -172,6 +179,91 @@ class ScanTest(unittest.TestCase):
         (root / "blob.bin").write_bytes(b"\x00\x01" + PLATE.encode())
         subprocess.run(["git", "add", "-A"], cwd=root, check=True)
         self.assertEqual(scan(root), [])
+
+
+class PlatesSectionTest(unittest.TestCase):
+    """The section:plates directive waives plate rules inside markers only."""
+
+    BEGIN = "<!-- repeat-plates:" + "begin -->"
+    END = "<!-- repeat-plates:" + "end -->"
+
+    def test_section_waives_plate_rules_only_inside_markers(self):
+        lines = [
+            "כותרת ללא לוחיות",
+            self.BEGIN,
+            "<td>" + PLATE + "</td>",
+            self.END,
+            "מחוץ למקטע " + PLATE,
+        ]
+        findings = scan_lines("index.html", lines, set(), allow_plates_section=True)
+        self.assertEqual([f.line for f in findings], [5, 5])
+        self.assertEqual({f.rule for f in findings}, {"plate", "plate-compact"})
+
+    def test_unbalanced_section_waives_nothing(self):
+        lines = [self.BEGIN, "<td>" + PLATE + "</td>"]
+        findings = scan_lines("index.html", lines, set(), allow_plates_section=True)
+        self.assertEqual(len(findings), 2)
+        self.assertTrue(all(f.line == 2 for f in findings))
+
+    def test_section_requires_opt_in(self):
+        lines = [self.BEGIN, PLATE, self.END]
+        findings = scan_lines("index.html", lines, set())
+        self.assertTrue(findings)
+
+    def test_allowlist_directive_via_scan(self):
+        root = make_repo(
+            {
+                ".privacy-scan-allow": "index.html section:plates\n",
+                "index.html": "כותרת\n"
+                + self.BEGIN
+                + "\n<td>"
+                + PLATE
+                + "</td>\n"
+                + self.END
+                + "\n",
+            }
+        )
+        self.assertEqual(scan(root), [])
+
+    def test_allowlist_directive_keeps_rest_of_file_guarded(self):
+        root = make_repo(
+            {
+                ".privacy-scan-allow": "index.html section:plates\n",
+                "index.html": PLATE
+                + "\n"
+                + self.BEGIN
+                + "\n<td>"
+                + PLATE
+                + "</td>\n"
+                + self.END
+                + "\n",
+            }
+        )
+        findings = scan(root)
+        self.assertEqual(len(findings), 2)
+        self.assertTrue(all(f.line == 1 for f in findings))
+
+    def test_extra_marker_pair_waives_nothing(self):
+        lines = [
+            self.BEGIN,
+            PLATE,
+            self.END,
+            self.BEGIN,
+            PLATE,
+            self.END,
+        ]
+        findings = scan_lines("index.html", lines, set(), allow_plates_section=True)
+        self.assertEqual([f.line for f in findings], [2, 2, 5, 5])
+
+    def test_marker_lines_stay_strict(self):
+        lines = [self.BEGIN + " " + PLATE, PLATE, self.END]
+        findings = scan_lines("index.html", lines, set(), allow_plates_section=True)
+        self.assertEqual([f.line for f in findings], [1, 1])
+
+    def test_unknown_directive_still_rejected(self):
+        root = make_repo({".privacy-scan-allow": "index.html section:bogus\n"})
+        with self.assertRaises(ValueError):
+            load_allowlist(root)
 
 
 if __name__ == "__main__":
