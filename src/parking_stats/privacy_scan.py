@@ -10,7 +10,7 @@ patterns that indicate private data:
   digits, each optionally separated by one such separator (covers a
   stray space inside the number). ISO-style dates (YYYY-MM-DD and
   friends) are excluded from the compact rule;
-- Israeli mobile numbers: 05X / +972 / 972 / 00972 prefixes, an
+- Israeli mobile numbers: 05X, +972, 972 or 00972 prefixes, an
   optional ``(0)`` after an international prefix, and any mix of
   dashes, spaces, dots, slashes or parentheses between digit groups;
 - JSON keys that exist only in raw municipal exports (``description``,
@@ -27,7 +27,8 @@ plain spaces.
 Paths in ``.privacy-scan-allow`` (one per line, ``#`` comments) are
 skipped. An entry is ``path`` to skip the whole file, or ``path rule``
 to skip only that rule for the file (``plate``, ``plate-compact``,
-``phone``, ``raw-export-key`` or ``raw-export-column``); prefer the
+``phone``, ``phone-bare``, ``raw-export-key`` or ``raw-export-column``);
+prefer the
 rule-scoped form so other rules still guard the file. Use it for files
 that carry synthetic detection samples and for known-safe collisions
 such as package metadata fields named ``description``.
@@ -72,21 +73,25 @@ RULES: dict[str, re.Pattern[str]] = {
         rf"\b\d{{2}}[{_SEP}]+\d{{3}}[{_SEP}]+\d{{2}}\b"
         rf"|\b\d{{3}}[{_SEP}]+\d{{2}}[{_SEP}]+\d{{3}}\b"
     ),
-    # Compact Israeli plates: 7-8 digits, each optionally followed by one
-    # separator (covers bare runs and stray-separator forms alike).
+    # Compact Israeli plates: 7-8 digits with optional separators between
+    # digits, repeats allowed (covers bare runs and stray-separator forms).
     # forms). ISO-style dates (2026-11-01) are excluded by the lookahead.
     # Bare 7-8 digit counts are accepted false positives (aggregates never
     # hold numbers that size).
     "plate-compact": re.compile(
-        rf"(?<!\d)(?!\d{{4}}[-./\s]\d{{2}}[-./\s]\d{{2}}(?!\d))"
-        rf"(?:\d[{_SEP}]?){{6,7}}\d(?!\d)"
+        rf"(?<!\d)(?!\d{{4}}[{_SEP}]\d{{2}}[{_SEP}]\d{{2}}(?!\d))"
+        rf"(?:\d[{_SEP}]*){{6,7}}\d(?!\d)"
     ),
-    # Israeli mobiles: 05X / +972 / 972 / 00972 prefixes, optional (0)
-    # after the prefix, any dash/space/dot/slash/paren grouping.
+    # Israeli mobiles: 05X, +972, 972 or 00972 prefixes, optional (0)
+    # after the prefix, any dash/space/dot/slash/paren grouping; the bare
+    # 9-digit prefixless form is the phone-bare rule below. Bare 9-digit
+    # counts are accepted false positives (aggregates hold none).
     "phone": re.compile(
         rf"\b(?:\+?972|00972|0)[{_PHONE_SEP}]*(?:\(0\)[{_PHONE_SEP}]*)?"
         rf"5\d[{_PHONE_SEP}]*\d{{3}}[{_PHONE_SEP}]*\d{{4}}\b"
     ),
+    # Bare 9-digit mobile without a prefix: 5X XXX XXXX, any grouping.
+    "phone-bare": re.compile(rf"(?<!\d)5\d(?:[{_PHONE_SEP}]*\d){{7}}(?!\d)"),
     # Raw municipal export keys: case-insensitive, quoted or not,
     # whitespace tolerated, followed by ":" or "=".
     "raw-export-key": re.compile(
@@ -96,8 +101,8 @@ RULES: dict[str, re.Pattern[str]] = {
     ),
     # The same keys as CSV/TSV header columns, quotes/whitespace tolerated.
     "raw-export-column": re.compile(
-        r"(^|[,;])\s*[\"']?(?:description|caseid|case_number|closeddateincident)"
-        r"[\"']?\s*(?=,|;|$)",
+        r"(^|[,;\t])\s*[\"']?(?:description|caseid|case_number|closeddateincident)"
+        r"[\"']?\s*(?=,|;|\t|$)",
         re.IGNORECASE | re.MULTILINE,
     ),
 }
