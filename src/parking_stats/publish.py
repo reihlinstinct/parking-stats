@@ -367,7 +367,7 @@ def check_shape(input_dir: Path) -> list[str]:
 
 
 def _build_heatmap(
-    input_dir: Path, updated: str, geocoding: Path | None
+    input_dir: Path, updated: str, geocoding: Path | None, basemap: Path | None
 ) -> dict[str, str] | None:
     """Render heatmap.html + heatmap.json from floored street counts (#1).
 
@@ -388,21 +388,32 @@ def _build_heatmap(
         cells, below, unmapped = heatmap_mod.build_cells(by_street, mapping)
         if not cells:
             return {}
-        return {
+        basemap_svg = ""
+        if basemap is not None:
+            lines = heatmap_mod.load_basemap(basemap)
+            basemap_svg = heatmap_mod.build_basemap_svg(lines, cells)
+        files = {
             "heatmap.html": heatmap_mod.build_heatmap_html(
-                cells, unmapped, below, updated
+                cells, unmapped, below, updated, basemap=bool(basemap_svg)
             ),
             "heatmap.json": heatmap_mod.build_heatmap_json(
                 cells, unmapped, below, updated
             ),
         }
+        if basemap_svg:
+            files["data/basemap.svg"] = basemap_svg
+        return files
     except (ValueError, KeyError, TypeError, OSError) as exc:
         print(f"publish: heat map error: {exc}", file=sys.stderr)
         return None
 
 
 def publish(
-    input_dir: Path, public_dir: Path, label: str, geocoding: Path | None = None
+    input_dir: Path,
+    public_dir: Path,
+    label: str,
+    geocoding: Path | None = None,
+    basemap: Path | None = None,
 ) -> int:
     findings = scan_output(input_dir)
     # The label is free text that lands on the landing page; scan it with
@@ -413,7 +424,7 @@ def publish(
             print(f"publish: refused: {finding}", file=sys.stderr)
         return 1
     updated = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    heatmap_files = _build_heatmap(input_dir, updated, geocoding)
+    heatmap_files = _build_heatmap(input_dir, updated, geocoding, basemap)
     if heatmap_files is None:
         print("publish: refused: heat map build failed", file=sys.stderr)
         return 1
@@ -444,10 +455,24 @@ def publish(
     data_dir.mkdir(parents=True, exist_ok=True)
     for name, text in heatmap_files.items():
         target = data_dir / name if name.endswith(".json") else public_dir / name
+        if name.startswith("data/"):
+            target = public_dir / name
         target.write_text(text, encoding="utf-8")
-    for stale in (public_dir / "heatmap.html", data_dir / "heatmap.json"):
+    for stale in (
+        public_dir / "heatmap.html",
+        data_dir / "heatmap.json",
+        data_dir / "basemap.svg",
+    ):
         if not heatmap_files and stale.exists():
             stale.unlink()
+    if (
+        heatmap_files
+        and "data/basemap.svg" not in heatmap_files
+        and (data_dir / "basemap.svg").exists()
+    ):
+        # A build without --basemap removes a stale basemap so the page
+        # never embeds a map the current data did not produce.
+        (data_dir / "basemap.svg").unlink()
     shutil.copy2(input_dir / "report.html", public_dir / "report.html")
     for name in DATA_FILES:
         shutil.copy2(input_dir / name, data_dir / name)
@@ -491,8 +516,19 @@ def main(argv: list[str] | None = None) -> int:
         help="private street -> coordinate mapping JSON (build input, never "
         "committed); without it the heat map is skipped",
     )
+    parser.add_argument(
+        "--basemap",
+        type=Path,
+        default=(
+            Path(os.environ["PARKING_STATS_BASEMAP"])
+            if os.environ.get("PARKING_STATS_BASEMAP")
+            else None
+        ),
+        help="vendored public OSM street-line JSON (scripts/fetch_basemap.py); "
+        "adds a static basemap under the heat layer",
+    )
     args = parser.parse_args(argv)
-    return publish(args.input, args.public, args.label, args.geocoding)
+    return publish(args.input, args.public, args.label, args.geocoding, args.basemap)
 
 
 if __name__ == "__main__":
