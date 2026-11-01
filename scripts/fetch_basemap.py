@@ -23,7 +23,9 @@ QUERY = (
     f"({BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]});out geom;"
 )
 URL = "https://overpass-api.de/api/interpreter"
-USER_AGENT = "parking-stats-basemap-vendor (reihlinstinct@gmail.com)"
+USER_AGENT = (
+    "parking-stats-basemap-vendor (https://github.com/reihlinstinct/parking-stats)"
+)
 TOLERANCE_DEG = 0.00015  # ~15 m, below the ~8 m/px render resolution
 DECIMALS = 4  # ~11 m
 OUT = Path(__file__).resolve().parent.parent / "vendor" / "basemap-jerusalem.json"
