@@ -83,6 +83,22 @@ class RuleTest(unittest.TestCase):
         )
         self.assertFalse(RULES["raw-export-column"].search("street,reports"))
 
+    def test_compact_plate_allows_repeated_separators(self):
+        self.assertTrue(RULES["plate-compact"].search("123" + "  " + "4567"))
+        self.assertTrue(RULES["plate-compact"].search("12" + " - " + "34567"))
+        self.assertFalse(RULES["plate-compact"].search("2026 11 01"))
+
+    def test_bare_mobile_without_prefix(self):
+        self.assertTrue(RULES["phone-bare"].search("54" + "1234" + "567"))
+        self.assertTrue(RULES["phone-bare"].search("54-123-" + "4567"))
+        self.assertFalse(RULES["phone-bare"].search("5412" + "3456"))
+        self.assertFalse(RULES["phone-bare"].search("54123" + "45670"))
+
+    def test_raw_export_key_tsv_header(self):
+        self.assertTrue(
+            RULES["raw-export-column"].search("month\t" + "description" + "\treports")
+        )
+
     def test_normalisation_folds_tricky_unicode(self):
         self.assertTrue(
             RULES["plate"].search(normalize_line("１２" + "-３４" + "５-６７"))

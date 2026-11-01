@@ -32,15 +32,16 @@ finding; only then does it copy `report.html` and `data/` into
 
 - License plates: dashed/spaced forms with `- . / _`, whitespace or
   Unicode dashes (U+2010-U+2015, U+2212) as separators, repeats allowed;
-  and compact 7-8 digit forms, each digit optionally followed by one
-  separator (so a stray space inside the number is caught too). ISO
-  dates are excluded from the compact rule.
+  and compact 7-8 digit forms with optional separators (repeats allowed)
+  between the digits, so stray spaces inside the number are caught too.
+  ISO dates are excluded from the compact rule.
 - Israeli mobile numbers: `05X` / `+972` / `972` / `00972` prefixes, an
   optional `(0)` after an international prefix, and any mix of dashes,
-  spaces, dots, slashes or parentheses between the digit groups.
+  spaces, dots, slashes or parentheses between the digit groups; the bare
+  9-digit prefixless form is caught too.
 - Raw municipal export keys (`description`, `caseId`, `case_number`,
   `ClosedDateIncident`), case-insensitive, quoted or not, followed by
-  `:` or `=`, and the same names as CSV header columns.
+  `:` or `=`, and the same names as CSV or TSV header columns.
 
 All matching runs on normalised text: NFKC folding (full-width digits
 become ASCII), zero-width characters and BOM removed, no-break spaces
