@@ -1,6 +1,6 @@
 # parking-stats
 
-Aggregate-only public statistics from Jerusalem 106 parking reports.
+Aggregate-only public statistics from Jerusalem 106 reports (all categories; illegal parking is one of them).
 
 This repository publishes **aggregates only**: counts by month, week,
 category, street, neighborhood and hotspot, plus closure-time summaries.
@@ -25,8 +25,9 @@ python -m parking_stats.publish OUTPUT_DIR --label "..."
 The publisher re-scans every file, the `--label` text and the rendered
 landing page with the privacy rules and refuses to publish on any
 finding; only then does it copy `report.html` and `data/` into
-`public/`, which GitHub Pages serves. The live site currently shows
-**synthetic demo data** generated from test fixtures.
+`public/`, which GitHub Pages serves. The landing page (stat cards and
+inline SVG charts) is built from the same aggregate files; no scripts,
+trackers or external resources.
 
 ### What the scanner detects
 
