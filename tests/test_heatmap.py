@@ -398,7 +398,7 @@ class InteractiveMap28Test(unittest.TestCase):
         ]
         page = heatmap.build_heatmap_html(cells, 0, 0, "now")
         # Row 3 falls back to its number next to the dot...
-        self.assertRegex(page, r'<text[^>]*>3</text>')
+        self.assertRegex(page, r"<text[^>]*>3</text>")
         # ...and the table's # column carries its name.
         self.assertIn("<th>#</th>", page)
         self.assertIn("<tr><td>3</td><td>גגגג</td><td>30</td></tr>", page)

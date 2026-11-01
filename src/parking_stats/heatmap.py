@@ -50,8 +50,8 @@ _WORLD_PAD_MIN = 0.006
 # descending) holding this share of all mapped reports, then expands to
 # the grid aspect with a margin. Cells outside it stay in the table and
 # are revealed by zooming or panning.
-_VIEW_REPORTS_SHARE = 0.8
-_VIEW_MARGIN = 1.15
+_VIEW_REPORTS_SHARE = 0.9
+_VIEW_MARGIN = 1.3
 _VIEW_MIN_SPAN = 10.0
 # Max zoom in map.js: the smallest viewBox span. Nothing finer than the
 # published ~111 m cells exists, so zoom stops well above cell level.
@@ -176,7 +176,9 @@ def _projection(
     return project, bbox
 
 
-def build_basemap_path(lines: list[list[tuple[float, float]]], cells: list[Cell]) -> str:
+def build_basemap_path(
+    lines: list[list[tuple[float, float]]], cells: list[Cell]
+) -> str:
     """Project the vendored street lines into one SVG path string (#23).
 
     The output shares the overlay's projection so the two line up
@@ -443,9 +445,11 @@ def _map_svg(cells: list[Cell], basemap_path: str) -> tuple[str, int]:
     ]
     if basemap_path:
         parts.append(
+            # Non-scaling stroke: the basemap keeps a constant screen
+            # width at every zoom level instead of thickening on zoom-in.
             f'<path d="{basemap_path}" fill="none" stroke="#c9c4bb"'
-            ' stroke-width="0.18" stroke-linecap="round"'
-            ' stroke-linejoin="round"/>'
+            ' stroke-width="1.1" vector-effect="non-scaling-stroke"'
+            ' stroke-linecap="round" stroke-linejoin="round"/>'
         )
     # Label metrics scale with the initial viewBox: text renders at a
     # readable size in the cropped view and grows/shrinks with zoom;
