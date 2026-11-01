@@ -78,7 +78,11 @@ def hbar_chart(rows: list[tuple[str, int]], *, color: str = BAR_ALT) -> str:
         # Truncate long labels so they stay inside the reserved column and
         # never collide with the count sitting left of a short bar; the
         # full label is on the bar's <title>.
-        shown = label if len(label) <= max_label_chars else label[: max_label_chars - 1] + "…"
+        shown = (
+            label
+            if len(label) <= max_label_chars
+            else label[: max_label_chars - 1] + "…"
+        )
         parts.append(
             f'<text x="{width - 4}" y="{y + 15}" direction="rtl" '
             f'text-anchor="start" font-size="12" fill="{INK}">{_e(shown)}</text>'
