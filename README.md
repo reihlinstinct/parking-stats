@@ -32,6 +32,19 @@ finding; only then does it copy `report.html` and `data/` into
 inline SVG charts) is built from the same aggregate files; no scripts,
 trackers or external resources.
 
+### Heat map
+
+`heatmap.html` is a static street-level map: one cell per street with
+four reports or more, coordinates rounded to ~111 m, labels carry street
+names only (no house numbers). It is inline SVG plus a table - no
+scripts, no map tiles, no external resources, and a strict
+Content-Security-Policy meta tag, so viewing it contacts no third party.
+Coordinates come from a private street-to-coordinate mapping passed at
+publish time (`--geocoding PATH` or `PARKING_STATS_GEOCODING`); like the
+filing ledger, that mapping is a local build input and never enters this
+repository (`geocoding*.json` is gitignored). Without a mapping the heat
+map is skipped and any stale published copy is removed.
+
 ### What the scanner detects
 
 - License plates: dashed/spaced forms with `- . / _`, whitespace or

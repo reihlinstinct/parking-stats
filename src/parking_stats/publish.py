@@ -14,6 +14,7 @@ import csv
 import datetime as dt
 import html
 import json
+import os
 import re
 import shutil
 import sys
@@ -239,7 +240,9 @@ def _read_plates(input_dir: Path) -> list[tuple[str, int]]:
     return plates
 
 
-def build_index(input_dir: Path, label: str, updated: str) -> str:
+def build_index(
+    input_dir: Path, label: str, updated: str, *, heatmap_available: bool = False
+) -> str:
     """Render the landing page from the aggregate output files."""
     summary = json.loads((input_dir / "summary.json").read_text(encoding="utf-8"))
     monthly = _read_counts(input_dir / "monthly.csv")
@@ -272,7 +275,7 @@ def build_index(input_dir: Path, label: str, updated: str) -> str:
     )
     heatmap_link = (
         '<li><a href="heatmap.html">מפת חום של מוקדים חמים</a></li>'
-        if summary.get("hotspots")
+        if heatmap_available
         else ""
     )
     return PAGE.format(
@@ -352,30 +355,40 @@ def check_shape(input_dir: Path) -> list[str]:
     return findings
 
 
-def _build_heatmap(input_dir: Path, updated: str) -> dict[str, str] | None:
-    """Render heatmap.html + heatmap.json from floored hotspots (#1).
+def _build_heatmap(
+    input_dir: Path, updated: str, geocoding: Path | None
+) -> dict[str, str] | None:
+    """Render heatmap.html + heatmap.json from floored street counts (#1).
 
-    Returns {} when there is nothing to map (stale copies are removed by
-    the caller), None on a data error. Coordinates come only from the
-    committed geocoding mapping; the build stays offline.
+    Returns {} when there is nothing to map or no private mapping was
+    given (stale copies are removed by the caller), None on a data error.
+    Coordinates come only from the private mapping file passed with
+    --geocoding; it never enters this repository and the build stays
+    offline.
     """
+    if geocoding is None:
+        return {}
     try:
         summary = json.loads((input_dir / "summary.json").read_text(encoding="utf-8"))
-        hotspots = summary.get("hotspots") or {}
-        if not isinstance(hotspots, dict) or not hotspots:
+        by_street = summary.get("by_street") or {}
+        if not isinstance(by_street, dict) or not by_street:
             return {}
-        mapping = heatmap_mod.load_mapping()
-        points, _below, unmapped = heatmap_mod.build_points(hotspots, mapping)
+        mapping = heatmap_mod.load_mapping(geocoding)
+        cells, _below, unmapped = heatmap_mod.build_cells(by_street, mapping)
+        if not cells:
+            return {}
         return {
-            "heatmap.html": heatmap_mod.build_heatmap_html(),
-            "heatmap.json": heatmap_mod.build_heatmap_json(points, unmapped, updated),
+            "heatmap.html": heatmap_mod.build_heatmap_html(cells, unmapped, updated),
+            "heatmap.json": heatmap_mod.build_heatmap_json(cells, unmapped, updated),
         }
     except (ValueError, KeyError, TypeError, OSError) as exc:
         print(f"publish: heat map error: {exc}", file=sys.stderr)
         return None
 
 
-def publish(input_dir: Path, public_dir: Path, label: str) -> int:
+def publish(
+    input_dir: Path, public_dir: Path, label: str, geocoding: Path | None = None
+) -> int:
     findings = scan_output(input_dir)
     # The label is free text that lands on the landing page; scan it with
     # the same privacy rules before anything is written.
@@ -385,8 +398,14 @@ def publish(input_dir: Path, public_dir: Path, label: str) -> int:
             print(f"publish: refused: {finding}", file=sys.stderr)
         return 1
     updated = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    heatmap_files = _build_heatmap(input_dir, updated, geocoding)
+    if heatmap_files is None:
+        print("publish: refused: heat map build failed", file=sys.stderr)
+        return 1
     try:
-        index_text = build_index(input_dir, label, updated)
+        index_text = build_index(
+            input_dir, label, updated, heatmap_available=bool(heatmap_files)
+        )
     except (ValueError, KeyError, TypeError) as exc:
         print(f"publish: refused: index build failed: {exc}", file=sys.stderr)
         return 1
@@ -399,10 +418,6 @@ def publish(input_dir: Path, public_dir: Path, label: str) -> int:
     if index_findings:
         for finding in index_findings:
             print(f"publish: refused: {finding}", file=sys.stderr)
-        return 1
-    heatmap_files = _build_heatmap(input_dir, updated)
-    if heatmap_files is None:
-        print("publish: refused: heat map build failed", file=sys.stderr)
         return 1
     for name, text in heatmap_files.items():
         findings = [str(f) for f in scan_lines(name, text.splitlines(), set())]
@@ -450,8 +465,19 @@ def main(argv: list[str] | None = None) -> int:
         default="דיווחי 106 מצטברים",
         help="data-source label shown on the landing page",
     )
+    parser.add_argument(
+        "--geocoding",
+        type=Path,
+        default=(
+            Path(os.environ["PARKING_STATS_GEOCODING"])
+            if os.environ.get("PARKING_STATS_GEOCODING")
+            else None
+        ),
+        help="private street -> coordinate mapping JSON (build input, never "
+        "committed); without it the heat map is skipped",
+    )
     args = parser.parse_args(argv)
-    return publish(args.input, args.public, args.label)
+    return publish(args.input, args.public, args.label, args.geocoding)
 
 
 if __name__ == "__main__":

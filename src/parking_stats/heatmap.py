@@ -1,11 +1,15 @@
-"""Public hotspot heat map for the Pages site (#1).
+"""Public street-level heat map for the Pages site (#1).
 
 Counts only, matching the aggregate-only rule: the input is the floored
-hotspot map from summary.json (street+house -> count), coordinates come
-from the committed, reviewed geocoding mapping (no live geocoding in the
-build), every emitted point is rounded to ~3 decimals (~111 m) and counts
-are aggregated at that rounded level, and spots below the threshold never
-appear. Unmapped or below-threshold spots are counted, never shown.
+by_street map from summary.json (street -> count), coordinates come from
+a private mapping file passed to the publisher with ``--geocoding`` (the
+mapping is a build input, like the filing ledger, and never enters this
+repository), every emitted coordinate is rounded to ~3 decimals
+(~111 m), counts are floored per street, and streets below the threshold
+never appear. The rendered page is fully static - inline SVG and a
+table, no scripts and no external resources - so viewing it contacts no
+third party. Unmapped or below-threshold streets are counted, never
+shown.
 """
 
 from __future__ import annotations
@@ -14,83 +18,29 @@ import json
 import math
 from pathlib import Path
 from typing import TypedDict
+from xml.sax.saxutils import escape
 
-MIN_SPOT_REPORTS = 3
+MIN_STREET_REPORTS = 4
 COORD_DECIMALS = 3
-
-DEFAULT_MAPPING = Path(__file__).with_name("geocoding.json")
-
-
-class Point(TypedDict):
-    lat: float
-    lng: float
-    n: int
-    label: str
 
 # Rough Israel bounds; a mapping entry outside them is a data error.
 _LAT_RANGE = (29.0, 34.0)
 _LNG_RANGE = (33.0, 36.5)
 
-PAGE = """<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>מפת חום - דיווחי 106 ירושלים</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<style>
-body { font-family: system-ui, sans-serif; margin: 0; }
-header { padding: 1rem 1.5rem; }
-h1 { font-size: 1.4rem; margin: 0 0 .4rem; }
-header p { margin: .2rem 0; }
-#map { height: 78vh; width: 100%; }
-footer { padding: .6rem 1.5rem; color: #555; font-size: .85rem; }
-#error { color: #900; padding: 0 1.5rem; }
-</style>
-</head>
-<body>
-<header>
-<h1>מפת חום - מוקדי דיווחים</h1>
-<p>מוקדים עם __THRESHOLD__ דיווחים ומעלה בלבד, ברזולוציה מעוגנת של כ-111
-מטר. ספירות בלבד - ללא נתונים גולמיים, לוחיות רישוי או שמות.</p>
-<p><a href="index.html">חזרה לדף הראשי</a></p>
-</header>
-<div id="map"></div>
-<p id="error"></p>
-<footer>נתונים מצטברים בלבד &middot; עודכן: <span id="updated">-</span></footer>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-<script>
-fetch('data/heatmap.json').then(function (r) { return r.json(); }).then(function (payload) {
-  var map = L.map('map');
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  }).addTo(map);
-  var pts = payload.points.map(function (p) { return [p.lat, p.lng, p.n]; });
-  L.heatLayer(pts, {}).addTo(map);
-  if (pts.length) {
-    map.fitBounds(L.latLngBounds(pts.map(function (p) { return [p[0], p[1]]; })).pad(0.25));
-  } else {
-    map.setView([31.78, 35.21], 12);
-  }
-  payload.points.forEach(function (p) {
-    L.circleMarker([p.lat, p.lng], { radius: 8, opacity: 0, fillOpacity: 0 })
-      .bindTooltip(p.label + ': ' + p.n + ' דיווחים')
-      .addTo(map);
-  });
-  document.getElementById('updated').textContent = payload.updated;
-}).catch(function () {
-  document.getElementById('error').textContent = 'טעינת נתוני המפה נכשלה.';
-});
-</script>
-</body>
-</html>
-"""
+_SVG_WIDTH = 760
+_SVG_HEIGHT = 480
+_SVG_PAD = 46
 
 
-def load_mapping(path: Path = DEFAULT_MAPPING) -> dict[str, tuple[float, float]]:
-    """Read the committed street+house -> (lat, lng) mapping and validate it."""
+class Cell(TypedDict):
+    lat: float
+    lng: float
+    n: int
+    label: str
+
+
+def load_mapping(path: Path) -> dict[str, tuple[float, float]]:
+    """Read a private street -> (lat, lng) mapping file and validate it."""
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("geocoding mapping must be a JSON object")
@@ -116,47 +66,141 @@ def load_mapping(path: Path = DEFAULT_MAPPING) -> dict[str, tuple[float, float]]
     return mapping
 
 
-def build_points(
-    hotspots: dict[str, int], mapping: dict[str, tuple[float, float]]
-) -> tuple[list[Point], int, int]:
-    """Round, aggregate and floor the hotspot counts.
+def build_cells(
+    by_street: dict[str, int], mapping: dict[str, tuple[float, float]]
+) -> tuple[list[Cell], int, int]:
+    """Floor, round and aggregate street counts into map cells.
 
-    Returns (points, below_threshold_count, unmapped_count). Points carry
-    only lat/lng/count/label and are sorted by count descending.
+    Returns (cells, below_threshold_count, unmapped_count). Streets that
+    round to the same cell share it: counts are summed and the label
+    joins the street names with " / ". Cells carry only rounded
+    coordinates, a count and a street-level label, and are sorted by
+    count descending.
     """
-    aggregated: dict[tuple[float, float], Point] = {}
+    aggregated: dict[tuple[float, float], Cell] = {}
     below = 0
     unmapped = 0
-    for spot, count in hotspots.items():
+    for street, count in by_street.items():
         if not isinstance(count, int) or isinstance(count, bool) or count < 0:
-            raise ValueError(f"hotspots: bad count for {spot!r}")
-        if count < MIN_SPOT_REPORTS:
+            raise ValueError(f"by_street: bad count for {street!r}")
+        if count < MIN_STREET_REPORTS:
             below += 1
             continue
-        coords = mapping.get(spot)
+        coords = mapping.get(street)
         if coords is None:
             unmapped += 1
             continue
         key = (round(coords[0], COORD_DECIMALS), round(coords[1], COORD_DECIMALS))
-        point = aggregated.setdefault(
-            key, {"lat": key[0], "lng": key[1], "n": 0, "label": spot}
+        cell = aggregated.setdefault(
+            key, {"lat": key[0], "lng": key[1], "n": 0, "label": street}
         )
-        point["n"] += count
-    points = sorted(aggregated.values(), key=lambda p: (-p["n"], p["label"]))
-    return points, below, unmapped
+        cell["n"] += count
+        if cell["label"] != street:
+            cell["label"] = " / ".join(sorted(cell["label"].split(" / ") + [street]))
+    cells = sorted(aggregated.values(), key=lambda c: (-c["n"], c["label"]))
+    return cells, below, unmapped
 
 
-def build_heatmap_json(points: list[Point], unmapped: int, updated: str) -> str:
+def build_heatmap_json(cells: list[Cell], unmapped: int, updated: str) -> str:
     payload = {
-        "schema_version": 1,
-        "threshold": MIN_SPOT_REPORTS,
+        "schema_version": 2,
+        "aggregation": "street",
+        "threshold": MIN_STREET_REPORTS,
         "rounding_decimals": COORD_DECIMALS,
         "updated": updated,
-        "unmapped_spots": unmapped,
-        "points": points,
+        "unmapped_streets": unmapped,
+        "cells": cells,
     }
     return json.dumps(payload, ensure_ascii=False, indent=1) + "\n"
 
 
-def build_heatmap_html() -> str:
-    return PAGE.replace("__THRESHOLD__", str(MIN_SPOT_REPORTS))
+def _svg(cells: list[Cell]) -> str:
+    """Draw the cells as an inline SVG scatter; labels stay in <title>."""
+    if not cells:
+        return ""
+    lats = [c["lat"] for c in cells]
+    lngs = [c["lng"] for c in cells]
+    min_lat, max_lat = min(lats), max(lats)
+    min_lng, max_lng = min(lngs), max(lngs)
+    lat_span = (max_lat - min_lat) or 0.01
+    lng_span = (max_lng - min_lng) or 0.01
+    max_n = max(c["n"] for c in cells)
+
+    def x(lng: float) -> float:
+        return _SVG_PAD + (lng - min_lng) / lng_span * (_SVG_WIDTH - 2 * _SVG_PAD)
+
+    def y(lat: float) -> float:
+        return (
+            _SVG_HEIGHT
+            - _SVG_PAD
+            - (lat - min_lat) / lat_span * (_SVG_HEIGHT - 2 * _SVG_PAD)
+        )
+
+    parts = [
+        f'<svg width="{_SVG_WIDTH}" height="{_SVG_HEIGHT}" role="img" '
+        'aria-label="מפת מוקדים חמים ברמת רחוב">',
+        f'<rect width="{_SVG_WIDTH}" height="{_SVG_HEIGHT}" fill="#f7f5f0"/>',
+    ]
+    for cell in cells:
+        ratio = cell["n"] / max_n
+        radius = round(8 + 26 * math.sqrt(ratio), 1)
+        opacity = round(0.25 + 0.55 * ratio, 2)
+        label = escape(f"{cell['label']}: {cell['n']} דיווחים", {'"': "&quot;"})
+        parts.append(
+            f'<circle cx="{x(cell["lng"]):.1f}" cy="{y(cell["lat"]):.1f}" '
+            f'r="{radius}" fill="#c0392b" fill-opacity="{opacity}" '
+            f'stroke="#7b241c" stroke-width="1">'
+            f"<title>{label}</title></circle>"
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def build_heatmap_html(cells: list[Cell], unmapped: int, updated: str) -> str:
+    rows = "".join(
+        f"<tr><td>{escape(c['label'])}</td><td>{c['n']}</td></tr>" for c in cells
+    )
+    table = (
+        "<table><thead><tr><th>רחוב</th><th>דיווחים</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+        if cells
+        else ""
+    )
+    note = f"<p>{unmapped} רחובות נוספים מעל הסף ללא מיפוי.</p>" if unmapped else ""
+    return f"""<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy"
+ content="default-src 'none'; style-src 'unsafe-inline'">
+<title>מפת חום - דיווחי 106 ירושלים</title>
+<style>
+body {{ font-family: system-ui, sans-serif; margin: 0; color: #222; }}
+header {{ padding: 1rem 1.5rem; }}
+h1 {{ font-size: 1.4rem; margin: 0 0 .4rem; }}
+header p {{ margin: .2rem 0; }}
+main {{ padding: 0 1.5rem; }}
+svg {{ max-width: 100%; height: auto; border: 1px solid #ddd; }}
+table {{ border-collapse: collapse; margin: 1rem 0; }}
+th, td {{ border: 1px solid #ccc; padding: .3rem .8rem; text-align: right; }}
+footer {{ padding: .6rem 1.5rem; color: #555; font-size: .85rem; }}
+</style>
+</head>
+<body>
+<header>
+<h1>מפת חום - מוקדי דיווחים ברמת רחוב</h1>
+<p>רחובות עם {MIN_STREET_REPORTS} דיווחים ומעלה בלבד, ברזולוציה מעוגנת
+של כ-111 מטר. ספירות בלבד - ללא נתונים גולמיים, לוחיות רישוי או שמות.
+הדף סטטי: ללא סקריפטים וללא גורמים חיצוניים.</p>
+<p><a href="index.html">חזרה לדף הראשי</a></p>
+</header>
+<main>
+{_svg(cells)}
+{table}
+{note}
+</main>
+<footer>נתונים מצטברים בלבד &middot; עודכן: {escape(updated)}</footer>
+</body>
+</html>
+"""
