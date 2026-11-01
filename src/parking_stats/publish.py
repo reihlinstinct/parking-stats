@@ -391,21 +391,18 @@ def _build_heatmap(
         cells, below, unmapped = heatmap_mod.build_cells(by_street, mapping)
         if not cells:
             return {}
-        basemap_svg = ""
-        if basemap is not None:
-            lines = heatmap_mod.load_basemap(basemap)
-            basemap_svg = heatmap_mod.build_basemap_svg(lines, cells)
-        files = {
+        lines = heatmap_mod.load_basemap(basemap) if basemap is not None else None
+        return {
             "heatmap.html": heatmap_mod.build_heatmap_html(
-                cells, unmapped, below, updated, basemap=bool(basemap_svg)
+                cells, unmapped, below, updated, basemap_lines=lines
             ),
             "heatmap.json": heatmap_mod.build_heatmap_json(
                 cells, unmapped, below, updated
             ),
+            # First-party zoom/pan script, served same-origin under
+            # script-src 'self' (#28); static content, no requests.
+            "data/map.js": heatmap_mod.MAP_JS,
         }
-        if basemap_svg:
-            files["data/basemap.svg"] = basemap_svg
-        return files
     except (ValueError, KeyError, TypeError, OSError) as exc:
         print(f"publish: heat map error: {exc}", file=sys.stderr)
         return None
@@ -468,13 +465,9 @@ def publish(
     ):
         if not heatmap_files and stale.exists():
             stale.unlink()
-    if (
-        heatmap_files
-        and "data/basemap.svg" not in heatmap_files
-        and (data_dir / "basemap.svg").exists()
-    ):
-        # A build without --basemap removes a stale basemap so the page
-        # never embeds a map the current data did not produce.
+    if heatmap_files and (data_dir / "basemap.svg").exists():
+        # The basemap is inlined into heatmap.html since #28; a stale
+        # standalone basemap.svg from an older build is removed.
         (data_dir / "basemap.svg").unlink()
     shutil.copy2(input_dir / "report.html", public_dir / "report.html")
     for name in DATA_FILES:

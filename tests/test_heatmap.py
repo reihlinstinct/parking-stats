@@ -117,8 +117,13 @@ class HtmlTest(unittest.TestCase):
 
     def test_static_page_no_external_resources(self) -> None:
         page = self._html({"א": 9})
-        for forbidden in ("<script", "unpkg", "openstreetmap", "http://", "https://"):
+        for forbidden in ("unpkg", "openstreetmap", "http://", "https://"):
             self.assertNotIn(forbidden, page)
+        # The only script is the first-party zoom/pan helper, same-origin.
+        self.assertEqual(page.count("<script"), 1)
+        self.assertIn('<script src="data/map.js" defer></script>', page)
+        self.assertIn("script-src 'self'", page)
+        self.assertNotIn("script-src 'unsafe-inline'", page)
         self.assertIn("Content-Security-Policy", page)
 
     def test_street_name_escaped(self) -> None:
@@ -155,13 +160,15 @@ class NitFixes18Test(unittest.TestCase):
     def test_singular_grammar_in_notes(self) -> None:
         page = heatmap.build_heatmap_html([], 1, 1, "now")
         self.assertIn("רחוב נוסף אחד מעל הסף ללא מיפוי.", page)
-        self.assertIn("רחוב נוסף אחד מתחת לסף", page)
+        self.assertIn("רחוב נוסף אחד מתחת לסף ולכן אינו מוצג.", page)
         self.assertNotIn("1 רחובות", page)
 
     def test_plural_grammar_in_notes(self) -> None:
         page = heatmap.build_heatmap_html([], 3, 2, "now")
         self.assertIn("3 רחובות נוספים מעל הסף ללא מיפוי.", page)
-        self.assertIn("2 רחובות נוספים מתחת לסף", page)
+        # #28: plural verb, pinned full-text.
+        self.assertIn("2 רחובות נוספים מתחת לסף ולכן אינם מוצגים.", page)
+        self.assertNotIn("אינו מוצג", page.replace("אינו מוצג.", ""))
 
     def test_street_name_containing_separator_survives_merge(self) -> None:
         tricky = "רחוב א / ב"
@@ -239,23 +246,22 @@ class PublishWiringTest(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertEqual(self._publish(geocoding=self.mapping, basemap=basemap), 0)
-        self.assertTrue((self.public / "data" / "basemap.svg").exists())
-        page = (self.public / "heatmap.html").read_text(encoding="utf-8")
-        self.assertIn('src="data/basemap.svg"', page)
-        self.assertIn("OpenStreetMap contributors (ODbL)", page)
-
-    def test_stale_basemap_removed_without_flag(self) -> None:
-        basemap = Path(self.tmp.name) / "basemap.json"
-        basemap.write_text(
-            '{"lines": [[[31.7704, 35.2104], [31.7710, 35.2110]]]}',
-            encoding="utf-8",
-        )
-        self.assertEqual(self._publish(geocoding=self.mapping, basemap=basemap), 0)
-        self.assertTrue((self.public / "data" / "basemap.svg").exists())
-        self.assertEqual(self._publish(geocoding=self.mapping), 0)
+        # #28: the basemap is inlined into the interactive SVG; the
+        # standalone basemap.svg is gone and map.js ships same-origin.
         self.assertFalse((self.public / "data" / "basemap.svg").exists())
+        self.assertTrue((self.public / "data" / "map.js").exists())
         page = (self.public / "heatmap.html").read_text(encoding="utf-8")
         self.assertNotIn("basemap.svg", page)
+        self.assertIn("<path", page)  # inlined street lines
+        self.assertIn("https://www.openstreetmap.org/copyright", page)
+        self.assertIn("OpenStreetMap contributors</a> (ODbL)", page)
+
+    def test_stale_basemap_svg_removed(self) -> None:
+        data = self.public / "data"
+        data.mkdir(parents=True)
+        (data / "basemap.svg").write_text("<svg/>", encoding="utf-8")
+        self.assertEqual(self._publish(geocoding=self.mapping), 0)
+        self.assertFalse((self.public / "data" / "basemap.svg").exists())
 
     def test_stale_heatmap_removed_without_geocoding(self) -> None:
         self.assertEqual(self._publish(geocoding=self.mapping), 0)
@@ -286,16 +292,15 @@ class BasemapGradient23Test(unittest.TestCase):
         cells, _b, _u = heatmap.build_cells({"א": 9, "ג": 4}, self.MAPPING)
         return cells
 
-    def test_basemap_svg_clips_to_cells_bbox(self) -> None:
-        svg = heatmap.build_basemap_svg(self.LINES, self._cells())
-        self.assertIn("<path", svg)
-        self.assertNotIn("http://", svg.replace("http://www.w3.org/2000/svg", ""))
+    def test_basemap_path_clips_to_cells_bbox(self) -> None:
+        path = heatmap.build_basemap_path(self.LINES, self._cells())
+        self.assertTrue(path.startswith("M"))
         # The far-away line contributes no path commands of its own:
-        self.assertEqual(svg.count("M"), 1)
+        self.assertEqual(path.count("M"), 1)
 
-    def test_basemap_svg_no_lines_in_bbox(self) -> None:
-        svg = heatmap.build_basemap_svg([self.LINES[1]], self._cells())
-        self.assertEqual(svg, "")
+    def test_basemap_path_no_lines_in_bbox(self) -> None:
+        path = heatmap.build_basemap_path([self.LINES[1]], self._cells())
+        self.assertEqual(path, "")
 
     def test_load_basemap_validation(self) -> None:
         import tempfile
@@ -317,25 +322,121 @@ class BasemapGradient23Test(unittest.TestCase):
             self.assertEqual(len(heatmap.load_basemap(path)), 1)
 
     def test_gradient_labels_legend_and_attribution(self) -> None:
-        page = heatmap.build_heatmap_html(self._cells(), 0, 0, "now", basemap=True)
+        page = heatmap.build_heatmap_html(
+            self._cells(), 0, 0, "now", basemap_lines=self.LINES
+        )
         self.assertIn("radialGradient", page)
         self.assertIn("feGaussianBlur", page)
-        self.assertIn('src="data/basemap.svg"', page)
-        self.assertIn("img-src 'self'", page)
-        self.assertIn("OpenStreetMap contributors (ODbL)", page)
-        self.assertIn("דיווחים: 4 - 9</text>", page)  # legend ramp endpoints
+        self.assertIn("<path", page)  # inlined basemap
+        self.assertIn(
+            '<a href="https://www.openstreetmap.org/copyright">'
+            "OpenStreetMap contributors</a> (ODbL)",
+            page,
+        )
+        # #28: RTL legend - highest on the left, label order "max - min"
+        # pinned LTR so bidi does not flip the numbers.
+        self.assertIn('דיווחים: <span dir="ltr">9 - 4</span>', page)
+        self.assertIn('class="legend"', page)
         self.assertIn(">א</text>", page)  # street label on the cell
-        for forbidden in (
-            "<script",
-            "unpkg",
-            "openstreetmap.org",
-            "http://",
-            "https://",
-        ):
-            self.assertNotIn(forbidden, page)
+        self.assertNotIn("unpkg", page)
+        # The single permitted URL is the ODbL attribution anchor.
+        self.assertEqual(page.count("https://"), 1)
+        self.assertNotIn("http://", page)
 
-    def test_without_basemap_no_img_or_attribution(self) -> None:
+    def test_without_basemap_no_path_or_attribution(self) -> None:
         page = heatmap.build_heatmap_html(self._cells(), 0, 0, "now")
-        self.assertNotIn("basemap.svg", page)
+        self.assertNotIn("basemap", page)
         self.assertNotIn("OpenStreetMap", page)
         self.assertIn("radialGradient", page)
+
+
+class InteractiveMap28Test(unittest.TestCase):
+    """#28: cropped centred view, zoom/pan script, label collisions."""
+
+    MAPPING = BuildCellsTest.MAPPING
+
+    def test_fallback_number_registered_in_collision_boxes(self) -> None:
+        # Four cells at one point: name above, name below, then numbered
+        # fallbacks. Every placed piece - including the numbers - must be
+        # registered so later labels never overlap them.
+        mapping = {
+            "א": (31.7704, 35.2104),
+            "ב": (31.7704, 35.2104),
+            "ג": (31.7704, 35.2104),
+            "ד": (31.7704, 35.2104),
+        }
+        cells, _b, _u = heatmap.build_cells(
+            {"א": 40, "ב": 30, "ג": 20, "ד": 10}, mapping
+        )
+        self.assertEqual(len(cells), 1)
+        # Force four cells at distinct-but-identical positions instead:
+        cells = [
+            {"lat": 31.770, "lng": 35.210, "n": 40, "label": "אאאא"},
+            {"lat": 31.770, "lng": 35.210, "n": 30, "label": "בבבב"},
+            {"lat": 31.770, "lng": 35.210, "n": 20, "label": "גגגג"},
+            {"lat": 31.770, "lng": 35.210, "n": 10, "label": "דדדד"},
+        ]
+        project, _bbox = heatmap._projection(cells)
+        _parts, placed = heatmap._render_cells(cells, project)
+        self.assertEqual(len(placed), 4)
+        # The third and fourth boxes are the fallback-number boxes of
+        # rows 3 and 4, next to the shared dot.
+        gx, gy = project(31.770, 35.210)
+        radius3 = heatmap._radius(cells[2], 40)
+        radius4 = heatmap._radius(cells[3], 40)
+        self.assertIn(heatmap._fallback_box(gx, gy, radius3, 3), placed)
+        self.assertIn(heatmap._fallback_box(gx, gy, radius4, 4), placed)
+
+    def test_numbered_fallback_and_hash_column(self) -> None:
+        # Equal counts: identical dots and label boxes, so the third
+        # cell's four candidate positions all collide and it falls back
+        # to its row number at any label scale.
+        cells = [
+            {"lat": 31.770, "lng": 35.210, "n": 30, "label": "אאאא"},
+            {"lat": 31.770, "lng": 35.210, "n": 30, "label": "בבבב"},
+            {"lat": 31.770, "lng": 35.210, "n": 30, "label": "גגגג"},
+        ]
+        page = heatmap.build_heatmap_html(cells, 0, 0, "now")
+        # Row 3 falls back to its number next to the dot...
+        self.assertRegex(page, r'<text[^>]*>3</text>')
+        # ...and the table's # column carries its name.
+        self.assertIn("<th>#</th>", page)
+        self.assertIn("<tr><td>3</td><td>גגגג</td><td>30</td></tr>", page)
+
+    def test_initial_view_crops_and_notes_outside_cells(self) -> None:
+        # One far-away low cell: the view crops to the dense cluster and
+        # the page says how many cells sit outside it (never dropped).
+        cells = [
+            {"lat": 31.770, "lng": 35.210, "n": 100, "label": "א"},
+            {"lat": 31.771, "lng": 35.211, "n": 90, "label": "ב"},
+            {"lat": 31.769, "lng": 35.209, "n": 80, "label": "ג"},
+            {"lat": 31.850, "lng": 35.350, "n": 4, "label": "רחוקה"},
+        ]
+        page = heatmap.build_heatmap_html(cells, 0, 0, "now")
+        self.assertIn('data-home="', page)
+        self.assertIn('data-world="0,0,76,48"', page)
+        self.assertIn('data-min-span="6"', page)
+        view = page.split('data-home="', 1)[1].split('"', 1)[0].split(",")
+        self.assertNotEqual([view[0], view[1]], ["0.00", "0.00"])
+        self.assertLess(float(view[2]), 76.0)  # cropped, not the whole world
+        self.assertIn("מוקד נוסף אחד מחוץ לתצוגה הראשונית", page)
+        # The outside cell is still in the table - no silent data drop.
+        self.assertIn("<tr><td>4</td><td>רחוקה</td><td>4</td></tr>", page)
+
+    def test_map_js_is_first_party_and_zoom_capped(self) -> None:
+        js = heatmap.MAP_JS
+        self.assertNotIn("http", js)
+        self.assertIn("minSpan", js)  # zoom cap honours data-min-span
+        self.assertIn("wheel", js)
+        self.assertIn("pointerdown", js)
+        self.assertIn("data-reset", js)
+
+    def test_no_js_static_fallback_still_renders(self) -> None:
+        page = heatmap.build_heatmap_html(
+            [{"lat": 31.770, "lng": 35.210, "n": 9, "label": "א"}], 0, 0, "now"
+        )
+        # The static centred view is the SVG's own viewBox; the script is
+        # deferred and the controls start hidden for no-JS readers.
+        self.assertIn("<noscript>", page)
+        self.assertIn('id="map-controls" hidden', page)
+        self.assertIn('viewBox="', page)

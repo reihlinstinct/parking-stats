@@ -34,24 +34,32 @@ trackers or external resources.
 
 ### Heat map
 
-`heatmap.html` is a static street-level map: one cell per street with
+`heatmap.html` is a street-level map: one cell per street with
 four reports or more, coordinates rounded to ~111 m, labels carry street
-names only (no house numbers). It is inline SVG plus a table - no
-scripts, no map tiles, no external resources, and a strict
-Content-Security-Policy meta tag, so viewing it contacts no third party.
+names only (no house numbers). It is inline SVG plus a table with no map
+tiles, no third-party scripts and no external requests of any kind, so
+viewing it contacts no third party; the only script is the small
+first-party zoom/pan helper `data/map.js`, served same-origin under a
+strict Content-Security-Policy meta tag (`script-src 'self'`).
 Coordinates come from a private street-to-coordinate mapping passed at
 publish time (`--geocoding PATH` or `PARKING_STATS_GEOCODING`); like the
 filing ledger, that mapping is a local build input and never enters this
 repository (`geocoding*.json` is gitignored). Without a mapping the heat
 map is skipped and any stale published copy is removed. The heat layer
 renders as blurred radial-gradient blobs with a colour ramp by count, a
-legend and street-name labels. A static street-line basemap (public
-OpenStreetMap geometry, ODbL, attribution on the page) is vendored by
-`scripts/fetch_basemap.py` into `vendor/basemap-jerusalem.json` - the
-only networked step, run manually - and embedded at publish time as a
-same-origin `data/basemap.svg` under the heat layer (`--basemap PATH` or
-`PARKING_STATS_BASEMAP`), so viewing the page still contacts no third
-party.
+legend (reading right-to-left for Hebrew: lowest on the right) and
+street-name labels with numbered fallbacks for dense clusters. The
+initial view is cropped to the dense cluster and centred on the hottest
+cells; cells outside it stay in the table with an explicit count note,
+and wheel/pinch/drag or the on-map buttons zoom and pan to them (zoom is
+capped well above the published ~111 m cell resolution; without
+JavaScript the centred static view still renders). A static street-line
+basemap (public OpenStreetMap geometry, ODbL, attribution on the page)
+is vendored by `scripts/fetch_basemap.py` into
+`vendor/basemap-jerusalem.json` - the only networked step, run manually -
+and inlined into the map SVG at publish time with a wide margin so
+panning still shows streets (`--basemap PATH` or
+`PARKING_STATS_BASEMAP`).
 
 ### What the scanner detects
 
