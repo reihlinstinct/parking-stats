@@ -388,12 +388,16 @@ def _build_heatmap(
         if not isinstance(by_street, dict) or not by_street:
             return {}
         mapping = heatmap_mod.load_mapping(geocoding)
-        cells, _below, unmapped = heatmap_mod.build_cells(by_street, mapping)
+        cells, below, unmapped = heatmap_mod.build_cells(by_street, mapping)
         if not cells:
             return {}
         return {
-            "heatmap.html": heatmap_mod.build_heatmap_html(cells, unmapped, updated),
-            "heatmap.json": heatmap_mod.build_heatmap_json(cells, unmapped, updated),
+            "heatmap.html": heatmap_mod.build_heatmap_html(
+                cells, unmapped, below, updated
+            ),
+            "heatmap.json": heatmap_mod.build_heatmap_json(
+                cells, unmapped, below, updated
+            ),
         }
     except (ValueError, KeyError, TypeError, OSError) as exc:
         print(f"publish: heat map error: {exc}", file=sys.stderr)

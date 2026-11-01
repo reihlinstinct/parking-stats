@@ -100,7 +100,7 @@ class BuildCellsTest(unittest.TestCase):
 class JsonTest(unittest.TestCase):
     def test_payload_shape(self) -> None:
         cells, _b, unmapped = heatmap.build_cells({"א": 9}, BuildCellsTest.MAPPING)
-        payload = json.loads(heatmap.build_heatmap_json(cells, unmapped, "now"))
+        payload = json.loads(heatmap.build_heatmap_json(cells, unmapped, 0, "now"))
         self.assertEqual(payload["aggregation"], "street")
         self.assertEqual(payload["threshold"], heatmap.MIN_STREET_REPORTS)
         self.assertEqual(payload["rounding_decimals"], heatmap.COORD_DECIMALS)
@@ -113,7 +113,7 @@ class HtmlTest(unittest.TestCase):
         mapping = dict(BuildCellsTest.MAPPING)
         mapping['x & <y> "z"'] = (31.7655, 35.2093)
         cells, _b, unmapped = heatmap.build_cells(streets, mapping)
-        return heatmap.build_heatmap_html(cells, unmapped, "2026-11-01 17:00 UTC")
+        return heatmap.build_heatmap_html(cells, unmapped, 0, "2026-11-01 17:00 UTC")
 
     def test_static_page_no_external_resources(self) -> None:
         page = self._html({"א": 9})
@@ -128,15 +128,49 @@ class HtmlTest(unittest.TestCase):
 
     def test_labels_have_no_house_numbers(self) -> None:
         cells, _b, _u = heatmap.build_cells({"א": 9, "ג": 4}, BuildCellsTest.MAPPING)
-        page = heatmap.build_heatmap_html(cells, 0, "now")
+        page = heatmap.build_heatmap_html(cells, 0, 0, "now")
         for cell in cells:
             self.assertNotRegex(cell["label"], r"\d")
         self.assertIn("<table>", page)
 
     def test_empty_cells_render_note(self) -> None:
-        page = heatmap.build_heatmap_html([], 3, "now")
+        page = heatmap.build_heatmap_html([], 3, 0, "now")
         self.assertIn("3", page)  # unmapped note
         self.assertNotIn("<table>", page)
+
+
+class NitFixes18Test(unittest.TestCase):
+    """#18: below-threshold count surfaced, singular grammar, label split."""
+
+    MAPPING = BuildCellsTest.MAPPING
+
+    def test_json_carries_below_threshold_count(self) -> None:
+        cells, below, unmapped = heatmap.build_cells(
+            {"א": 9, "ג": 2, "ד": 1}, self.MAPPING
+        )
+        payload = json.loads(heatmap.build_heatmap_json(cells, unmapped, below, "now"))
+        self.assertEqual(below, 2)
+        self.assertEqual(payload["below_threshold_streets"], 2)
+
+    def test_singular_grammar_in_notes(self) -> None:
+        page = heatmap.build_heatmap_html([], 1, 1, "now")
+        self.assertIn("רחוב נוסף אחד מעל הסף ללא מיפוי.", page)
+        self.assertIn("רחוב נוסף אחד מתחת לסף", page)
+        self.assertNotIn("1 רחובות", page)
+
+    def test_plural_grammar_in_notes(self) -> None:
+        page = heatmap.build_heatmap_html([], 3, 2, "now")
+        self.assertIn("3 רחובות נוספים מעל הסף ללא מיפוי.", page)
+        self.assertIn("2 רחובות נוספים מתחת לסף", page)
+
+    def test_street_name_containing_separator_survives_merge(self) -> None:
+        tricky = "רחוב א / ב"
+        mapping = dict(self.MAPPING)
+        mapping[tricky] = (31.7704, 35.2104)  # same cell as א
+        cells, _b, _u = heatmap.build_cells({"א": 4, tricky: 5}, mapping)
+        self.assertEqual(len(cells), 1)
+        self.assertEqual(cells[0]["n"], 9)
+        self.assertEqual(cells[0]["label"], f"א / {tricky}")
 
 
 class PublishWiringTest(unittest.TestCase):

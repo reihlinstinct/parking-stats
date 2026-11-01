@@ -39,6 +39,13 @@ class Cell(TypedDict):
     label: str
 
 
+class _AggCell(TypedDict):
+    lat: float
+    lng: float
+    n: int
+    names: list[str]
+
+
 def load_mapping(path: Path) -> dict[str, tuple[float, float]]:
     """Read a private street -> (lat, lng) mapping file and validate it."""
     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -71,13 +78,16 @@ def build_cells(
 ) -> tuple[list[Cell], int, int]:
     """Floor, round and aggregate street counts into map cells.
 
-    Returns (cells, below_threshold_count, unmapped_count). Streets that
+    Returns (cells, below_threshold_count, unmapped_count); both counts
+    are surfaced in the JSON payload and the page note. Streets that
     round to the same cell share it: counts are summed and the label
     joins the street names with " / ". Cells carry only rounded
     coordinates, a count and a street-level label, and are sorted by
     count descending.
     """
-    aggregated: dict[tuple[float, float], Cell] = {}
+    # Names accumulate as a list so a street name containing " / "
+    # cannot corrupt the join/split round trip.
+    aggregated: dict[tuple[float, float], _AggCell] = {}
     below = 0
     unmapped = 0
     for street, count in by_street.items():
@@ -92,16 +102,26 @@ def build_cells(
             continue
         key = (round(coords[0], COORD_DECIMALS), round(coords[1], COORD_DECIMALS))
         cell = aggregated.setdefault(
-            key, {"lat": key[0], "lng": key[1], "n": 0, "label": street}
+            key, {"lat": key[0], "lng": key[1], "n": 0, "names": []}
         )
         cell["n"] += count
-        if cell["label"] != street:
-            cell["label"] = " / ".join(sorted(cell["label"].split(" / ") + [street]))
-    cells = sorted(aggregated.values(), key=lambda c: (-c["n"], c["label"]))
+        cell["names"].append(street)
+    cells: list[Cell] = [
+        {
+            "lat": raw["lat"],
+            "lng": raw["lng"],
+            "n": raw["n"],
+            "label": " / ".join(sorted(raw["names"])),
+        }
+        for raw in aggregated.values()
+    ]
+    cells.sort(key=lambda c: (-c["n"], c["label"]))
     return cells, below, unmapped
 
 
-def build_heatmap_json(cells: list[Cell], unmapped: int, updated: str) -> str:
+def build_heatmap_json(
+    cells: list[Cell], unmapped: int, below: int, updated: str
+) -> str:
     payload = {
         "schema_version": 2,
         "aggregation": "street",
@@ -109,6 +129,7 @@ def build_heatmap_json(cells: list[Cell], unmapped: int, updated: str) -> str:
         "rounding_decimals": COORD_DECIMALS,
         "updated": updated,
         "unmapped_streets": unmapped,
+        "below_threshold_streets": below,
         "cells": cells,
     }
     return json.dumps(payload, ensure_ascii=False, indent=1) + "\n"
@@ -156,7 +177,16 @@ def _svg(cells: list[Cell]) -> str:
     return "".join(parts)
 
 
-def build_heatmap_html(cells: list[Cell], unmapped: int, updated: str) -> str:
+def _streets_note(count: int, suffix: str) -> str:
+    """Hebrew note line with singular/plural grammar."""
+    if count == 1:
+        return f"<p>רחוב נוסף אחד {suffix}.</p>"
+    return f"<p>{count} רחובות נוספים {suffix}.</p>"
+
+
+def build_heatmap_html(
+    cells: list[Cell], unmapped: int, below: int, updated: str
+) -> str:
     rows = "".join(
         f"<tr><td>{escape(c['label'])}</td><td>{c['n']}</td></tr>" for c in cells
     )
@@ -166,7 +196,11 @@ def build_heatmap_html(cells: list[Cell], unmapped: int, updated: str) -> str:
         if cells
         else ""
     )
-    note = f"<p>{unmapped} רחובות נוספים מעל הסף ללא מיפוי.</p>" if unmapped else ""
+    notes = ""
+    if below:
+        notes += _streets_note(below, "מתחת לסף ולכן אינו מוצג")
+    if unmapped:
+        notes += _streets_note(unmapped, "מעל הסף ללא מיפוי")
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
@@ -198,7 +232,7 @@ footer {{ padding: .6rem 1.5rem; color: #555; font-size: .85rem; }}
 <main>
 {_svg(cells)}
 {table}
-{note}
+{notes}
 </main>
 <footer>נתונים מצטברים בלבד &middot; עודכן: {escape(updated)}</footer>
 </body>
