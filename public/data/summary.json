@@ -368,5 +368,6 @@
   "inputs": [
     "reports_raw_union_A.json"
   ],
-  "duplicates_skipped": 0
+  "duplicates_skipped": 0,
+  "repeat_plates_count": 13
 }
