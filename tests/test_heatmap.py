@@ -440,3 +440,36 @@ class InteractiveMap28Test(unittest.TestCase):
         self.assertIn("<noscript>", page)
         self.assertIn('id="map-controls" hidden', page)
         self.assertIn('viewBox="', page)
+
+
+class ReviewLows30Test(unittest.TestCase):
+    """#30: #29 review lows - view-clipped labels, controls CSS, pan."""
+
+    def test_hottest_cell_at_view_top_stays_named(self) -> None:
+        # The hottest cell sits at the top edge of the cropped view: its
+        # name must move inside the view (below the dot), never clip.
+        cells = [
+            {"lat": 31.780, "lng": 35.210, "n": 100, "label": "חמה"},
+            {"lat": 31.770, "lng": 35.211, "n": 90, "label": "ב"},
+            {"lat": 31.769, "lng": 35.209, "n": 80, "label": "ג"},
+            {"lat": 31.771, "lng": 35.208, "n": 70, "label": "ד"},
+        ]
+        page = heatmap.build_heatmap_html(cells, 0, 0, "now")
+        vx, vy, vw, vh = (
+            float(v)
+            for v in page.split('data-home="', 1)[1].split('"', 1)[0].split(",")
+        )
+        import re as _re
+
+        m = _re.search(r'<text x="([\d.]+)" y="([\d.]+)"[^>]*>חמה</text>', page)
+        self.assertIsNotNone(m, "hottest street must keep its name label")
+        ly = float(m.group(2))
+        self.assertGreaterEqual(ly, vy)
+        self.assertLessEqual(ly, vy + vh)
+
+    def test_controls_hidden_without_js_and_no_text_selection(self) -> None:
+        page = heatmap.build_heatmap_html(
+            [{"lat": 31.770, "lng": 35.210, "n": 9, "label": "א"}], 0, 0, "now"
+        )
+        self.assertIn(".controls[hidden]", page)  # beats display:flex w/o JS
+        self.assertIn("user-select: none", page)  # drag-pan selects nothing

@@ -297,6 +297,7 @@ def _render_cells(
     cells: list[Cell],
     project: Callable[[float, float], tuple[float, float]],
     scale: float = 1.0,
+    view: tuple[float, float, float, float] | None = None,
 ) -> tuple[list[str], list[_Box]]:
     """Emit circle and label SVG fragments; return them with the boxes.
 
@@ -337,10 +338,28 @@ def _render_cells(
             (gx, gy - radius - 2.8 * scale),
             (gx, gy + radius + 4.3 * scale),
         ]
+        # Cells inside the initial view keep their labels inside it too:
+        # a name that would clip at the view's edge falls through to a
+        # position within the view (typically below the dot) so the
+        # hottest streets stay named in the default view (#30).
+        in_view = view is None or (
+            view[0] <= gx <= view[0] + view[2] and view[1] <= gy <= view[1] + view[3]
+        )
         chosen: tuple[float, float] | None = None
         for cx, cy in candidates:
             box = (cx - half, cy - height, cx + half, cy + 0.4)
             if cx - half < 0 or cx + half > _GRID_W:
+                continue
+            if (
+                in_view
+                and view is not None
+                and not (
+                    view[0] <= box[0]
+                    and box[2] <= view[0] + view[2]
+                    and view[1] <= box[1]
+                    and box[3] <= view[1] + view[3]
+                )
+            ):
                 continue
             if not _overlaps(box, placed):
                 chosen = (cx, cy)
@@ -454,7 +473,9 @@ def _map_svg(cells: list[Cell], basemap_path: str) -> tuple[str, int]:
     # Label metrics scale with the initial viewBox: text renders at a
     # readable size in the cropped view and grows/shrinks with zoom;
     # the dots, which represent geography, keep their grid size.
-    cell_parts, _placed = _render_cells(cells, project, scale=vw / _GRID_W)
+    cell_parts, _placed = _render_cells(
+        cells, project, scale=vw / _GRID_W, view=(vx, vy, vw, vh)
+    )
     parts.extend(cell_parts)
     parts.append("</svg>")
     return "".join(parts), outside
@@ -670,6 +691,8 @@ main {{ padding: 0 1.5rem; }}
 .mapwrap svg {{ display: block; width: 100%; height: auto; }}
 .controls {{ position: absolute; top: .4rem; inset-inline-start: .4rem;
   display: flex; gap: .3rem; z-index: 1; }}
+.controls[hidden] {{ display: none; }}
+.mapwrap svg, .mapwrap text {{ user-select: none; -webkit-user-select: none; }}
 .controls button {{ font-size: 1rem; min-width: 2rem; padding: .2rem .5rem;
   background: rgba(255,255,255,.92); border: 1px solid #999;
   border-radius: .25rem; cursor: pointer; }}
