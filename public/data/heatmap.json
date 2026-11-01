@@ -3,8 +3,9 @@
  "aggregation": "street",
  "threshold": 4,
  "rounding_decimals": 3,
- "updated": "2026-11-01 16:05 UTC",
+ "updated": "2026-11-01 16:22 UTC",
  "unmapped_streets": 1,
+ "below_threshold_streets": 0,
  "cells": [
   {
    "lat": 31.77,

@@ -232,6 +232,31 @@ class PublishWiringTest(unittest.TestCase):
         index = (self.public / "index.html").read_text(encoding="utf-8")
         self.assertNotIn("heatmap.html", index)
 
+    def test_publish_with_basemap_embeds_map(self) -> None:
+        basemap = Path(self.tmp.name) / "basemap.json"
+        basemap.write_text(
+            '{"lines": [[[31.7704, 35.2104], [31.7710, 35.2110]]]}',
+            encoding="utf-8",
+        )
+        self.assertEqual(self._publish(geocoding=self.mapping, basemap=basemap), 0)
+        self.assertTrue((self.public / "data" / "basemap.svg").exists())
+        page = (self.public / "heatmap.html").read_text(encoding="utf-8")
+        self.assertIn('src="data/basemap.svg"', page)
+        self.assertIn("OpenStreetMap contributors (ODbL)", page)
+
+    def test_stale_basemap_removed_without_flag(self) -> None:
+        basemap = Path(self.tmp.name) / "basemap.json"
+        basemap.write_text(
+            '{"lines": [[[31.7704, 35.2104], [31.7710, 35.2110]]]}',
+            encoding="utf-8",
+        )
+        self.assertEqual(self._publish(geocoding=self.mapping, basemap=basemap), 0)
+        self.assertTrue((self.public / "data" / "basemap.svg").exists())
+        self.assertEqual(self._publish(geocoding=self.mapping), 0)
+        self.assertFalse((self.public / "data" / "basemap.svg").exists())
+        page = (self.public / "heatmap.html").read_text(encoding="utf-8")
+        self.assertNotIn("basemap.svg", page)
+
     def test_stale_heatmap_removed_without_geocoding(self) -> None:
         self.assertEqual(self._publish(geocoding=self.mapping), 0)
         self.assertEqual(self._publish(), 0)
@@ -246,3 +271,71 @@ class PublishWiringTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BasemapGradient23Test(unittest.TestCase):
+    """#23: vendored OSM basemap, heat gradient, labels, legend."""
+
+    MAPPING = BuildCellsTest.MAPPING
+    LINES = [
+        [(31.7700, 35.2095), (31.7706, 35.2108)],  # crosses the cells
+        [(31.60, 35.10), (31.61, 35.11)],  # fully outside the bbox
+    ]
+
+    def _cells(self) -> list[heatmap.Cell]:
+        cells, _b, _u = heatmap.build_cells({"א": 9, "ג": 4}, self.MAPPING)
+        return cells
+
+    def test_basemap_svg_clips_to_cells_bbox(self) -> None:
+        svg = heatmap.build_basemap_svg(self.LINES, self._cells())
+        self.assertIn("<path", svg)
+        self.assertNotIn("http://", svg.replace("http://www.w3.org/2000/svg", ""))
+        # The far-away line contributes no path commands of its own:
+        self.assertEqual(svg.count("M"), 1)
+
+    def test_basemap_svg_no_lines_in_bbox(self) -> None:
+        svg = heatmap.build_basemap_svg([self.LINES[1]], self._cells())
+        self.assertEqual(svg, "")
+
+    def test_load_basemap_validation(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bm.json"
+            path.write_text('{"lines": [[31.7, 35.2]]}', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                heatmap.load_basemap(path)
+            path.write_text(
+                '{"lines": [[[40.0, 35.2], [40.1, 35.3]]]}', encoding="utf-8"
+            )
+            with self.assertRaises(ValueError):
+                heatmap.load_basemap(path)
+            path.write_text(
+                '{"lines": [[[31.77, 35.21], [31.78, 35.22]]]}', encoding="utf-8"
+            )
+            self.assertEqual(len(heatmap.load_basemap(path)), 1)
+
+    def test_gradient_labels_legend_and_attribution(self) -> None:
+        page = heatmap.build_heatmap_html(self._cells(), 0, 0, "now", basemap=True)
+        self.assertIn("radialGradient", page)
+        self.assertIn("feGaussianBlur", page)
+        self.assertIn('src="data/basemap.svg"', page)
+        self.assertIn("img-src 'self'", page)
+        self.assertIn("OpenStreetMap contributors (ODbL)", page)
+        self.assertIn("דיווחים: 4 - 9</text>", page)  # legend ramp endpoints
+        self.assertIn(">א</text>", page)  # street label on the cell
+        for forbidden in (
+            "<script",
+            "unpkg",
+            "openstreetmap.org",
+            "http://",
+            "https://",
+        ):
+            self.assertNotIn(forbidden, page)
+
+    def test_without_basemap_no_img_or_attribution(self) -> None:
+        page = heatmap.build_heatmap_html(self._cells(), 0, 0, "now")
+        self.assertNotIn("basemap.svg", page)
+        self.assertNotIn("OpenStreetMap", page)
+        self.assertIn("radialGradient", page)

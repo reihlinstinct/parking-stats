@@ -43,7 +43,15 @@ Coordinates come from a private street-to-coordinate mapping passed at
 publish time (`--geocoding PATH` or `PARKING_STATS_GEOCODING`); like the
 filing ledger, that mapping is a local build input and never enters this
 repository (`geocoding*.json` is gitignored). Without a mapping the heat
-map is skipped and any stale published copy is removed.
+map is skipped and any stale published copy is removed. The heat layer
+renders as blurred radial-gradient blobs with a colour ramp by count, a
+legend and street-name labels. A static street-line basemap (public
+OpenStreetMap geometry, ODbL, attribution on the page) is vendored by
+`scripts/fetch_basemap.py` into `vendor/basemap-jerusalem.json` - the
+only networked step, run manually - and embedded at publish time as a
+same-origin `data/basemap.svg` under the heat layer (`--basemap PATH` or
+`PARKING_STATS_BASEMAP`), so viewing the page still contacts no third
+party.
 
 ### What the scanner detects
 
