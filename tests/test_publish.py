@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -89,6 +90,49 @@ if __name__ == "__main__":
 
 PLATE8 = "123" + "-45-" + "678"
 PLATES_CSV = "plate,reports\n" + PLATE8 + ",4\n" + PLATE + ",3\n"
+
+
+class RepeatPlatesCountTest(unittest.TestCase):
+    """#14: repeat_plates_count must be an int >= 0 when present."""
+
+    def _code(self, value: object) -> int:
+        files = dict(FILES)
+        files["summary.json"] = (
+            '{"total_incidents": 13, "repeat_plates_count": '
+            + json.dumps(value)
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            public = Path(tmp) / "public"
+            return publish(make_input(files), public, "x")
+
+    def test_absent_key_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            public = Path(tmp) / "public"
+            self.assertEqual(publish(make_input(dict(FILES)), public, "x"), 0)
+
+    def test_zero_and_positive_int_are_accepted(self):
+        self.assertEqual(self._code(0), 0)
+        self.assertEqual(self._code(17), 0)
+
+    def test_non_int_is_refused(self):
+        for bad in ("3", 2.5, [1], {"n": 1}):
+            self.assertEqual(self._code(bad), 1, bad)
+
+    def test_bool_is_refused(self):
+        self.assertEqual(self._code(True), 1)
+        self.assertEqual(self._code(False), 1)
+
+    def test_negative_is_refused(self):
+        self.assertEqual(self._code(-1), 1)
+
+    def test_refusal_copies_nothing(self):
+        files = dict(FILES)
+        files["summary.json"] = '{"total_incidents": 1, "repeat_plates_count": -2}\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            public = Path(tmp) / "public"
+            self.assertEqual(publish(make_input(files), public, "x"), 1)
+            self.assertFalse(public.exists())
 
 
 class PublishPlatesTest(unittest.TestCase):
