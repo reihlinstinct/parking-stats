@@ -42,6 +42,7 @@ EXPECTED_SUMMARY_KEYS = {
     "closure",
     "inputs",
     "duplicates_skipped",
+    "repeat_plates_count",
 }
 
 REQUIRED = (
@@ -57,8 +58,8 @@ DATA_FILES = ("summary.json", "monthly.csv", "categories.csv", "streets.csv")
 OPTIONAL_DATA = ("plates.csv",)
 # Canonical dashed standard plates (7 or 8 digits) and a count of at
 # least the repeat threshold the aggregate is approved for.
-_PLATE_ROW = re.compile(r"^\d{2}-\d{3}-\d{2}$|^\d{3}-\d{2}-\d{3}$")
-_COUNT_ROW = re.compile(r"^\d+$")
+_PLATE_ROW = re.compile(r"\d{2}-\d{3}-\d{2}|\d{3}-\d{2}-\d{3}", re.ASCII)
+_COUNT_ROW = re.compile(r"\d+", re.ASCII)
 MIN_REPEAT_REPORTS = 3
 
 CSS = """
@@ -221,12 +222,18 @@ def _read_plates(input_dir: Path) -> list[tuple[str, int]]:
         return []
     with path.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.reader(handle))
+    if not rows or tuple(rows[0]) != EXPECTED_COLUMNS["plates.csv"]:
+        raise ValueError("plates.csv: unexpected header")
     plates: list[tuple[str, int]] = []
-    for plate, count in rows[1:]:
-        value = int(count)
+    for row in rows[1:]:
+        if len(row) != 2 or not _PLATE_ROW.fullmatch(row[0]):
+            raise ValueError("plates.csv: non-canonical plate")
+        if not _COUNT_ROW.fullmatch(row[1]):
+            raise ValueError("plates.csv: non-numeric count")
+        value = int(row[1])
         if value < MIN_REPEAT_REPORTS:
             raise ValueError("plates.csv: count below repeat threshold")
-        plates.append((plate, value))
+        plates.append((row[0], value))
     return plates
 
 
@@ -319,8 +326,8 @@ def check_shape(input_dir: Path) -> list[str]:
             for row in rows[1:]:
                 if (
                     len(row) != 2
-                    or not _PLATE_ROW.match(row[0])
-                    or not _COUNT_ROW.match(row[1])
+                    or not _PLATE_ROW.fullmatch(row[0])
+                    or not _COUNT_ROW.fullmatch(row[1])
                     or int(row[1]) < MIN_REPEAT_REPORTS
                 ):
                     findings.append("plates.csv: non-canonical row")
