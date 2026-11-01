@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parking_stats.publish import DATA_FILES, publish
+from parking_stats.publish import DATA_FILES, check_shape, publish
 
 PLATE = "12" + "-345-" + "67"
 
@@ -85,3 +85,64 @@ class PublishTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+PLATE8 = "123" + "-45-" + "678"
+PLATES_CSV = "plate,reports\n" + PLATE8 + ",4\n" + PLATE + ",3\n"
+
+
+class PublishPlatesTest(unittest.TestCase):
+    def test_publish_with_plates_csv_copies_and_renders_section(self):
+        input_dir = make_input({**FILES, "plates.csv": PLATES_CSV})
+        public = Path(tempfile.mkdtemp()) / "public"
+        self.assertEqual(publish(input_dir, public, "בדיקה"), 0)
+        self.assertEqual(
+            (public / "data" / "plates.csv").read_text(encoding="utf-8"), PLATES_CSV
+        )
+        index = (public / "index.html").read_text(encoding="utf-8")
+        self.assertIn("רכבים חוזרים", index)
+        self.assertIn(PLATE8, index)
+        self.assertIn("repeat-plates:begin", index)
+
+    def test_publish_removes_stale_plates_csv(self):
+        input_dir = make_input(FILES)
+        public = Path(tempfile.mkdtemp()) / "public"
+        (public / "data").mkdir(parents=True)
+        (public / "data" / "plates.csv").write_text(PLATES_CSV, encoding="utf-8")
+        self.assertEqual(publish(input_dir, public, "בדיקה"), 0)
+        self.assertFalse((public / "data" / "plates.csv").exists())
+        index = (public / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("רכבים חוזרים", index)
+
+    def test_publish_refuses_wrong_plates_columns(self):
+        input_dir = make_input({**FILES, "plates.csv": "street,reports\nx,1\n"})
+        public = Path(tempfile.mkdtemp()) / "public"
+        self.assertEqual(publish(input_dir, public, "בדיקה"), 1)
+
+    def test_publish_refuses_noncanonical_plate_row(self):
+        bad = "plate,reports\n" + "1234" + "5678" + ",4\n"
+        input_dir = make_input({**FILES, "plates.csv": bad})
+        public = Path(tempfile.mkdtemp()) / "public"
+        self.assertEqual(publish(input_dir, public, "בדיקה"), 1)
+
+    def test_publish_refuses_plate_in_label_even_with_section(self):
+        input_dir = make_input({**FILES, "plates.csv": PLATES_CSV})
+        public = Path(tempfile.mkdtemp()) / "public"
+        self.assertEqual(publish(input_dir, public, "תווית " + PLATE), 1)
+
+    def test_publish_refuses_count_below_repeat_threshold(self):
+        low = "plate,reports\n" + PLATE8 + ",2\n"
+        input_dir = make_input({**FILES, "plates.csv": low})
+        public = Path(tempfile.mkdtemp()) / "public"
+        self.assertEqual(publish(input_dir, public, "בדיקה"), 1)
+
+
+class CommittedPlatesTest(unittest.TestCase):
+    """CI gate: the committed published data keeps its approved shape."""
+
+    REPO_DATA = Path(__file__).resolve().parent.parent / "public" / "data"
+
+    def test_committed_data_shape(self):
+        if not (self.REPO_DATA / "plates.csv").exists():
+            self.skipTest("no committed plates.csv yet")
+        self.assertEqual(check_shape(self.REPO_DATA), [])
