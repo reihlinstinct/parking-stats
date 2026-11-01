@@ -335,12 +335,23 @@ def check_shape(input_dir: Path) -> list[str]:
     summary = input_dir / "summary.json"
     if summary.exists():
         try:
-            keys = set(json.loads(summary.read_text(encoding="utf-8")))
+            payload = json.loads(summary.read_text(encoding="utf-8"))
         except ValueError:
-            keys = set()
+            payload = {}
+        keys = set(payload)
         unexpected = keys - EXPECTED_SUMMARY_KEYS
         if unexpected:
             findings.append(f"summary.json: unexpected keys {sorted(unexpected)!r}")
+        repeat_plates = payload.get("repeat_plates_count")
+        if repeat_plates is not None and (
+            not isinstance(repeat_plates, int)
+            or isinstance(repeat_plates, bool)
+            or repeat_plates < 0
+        ):
+            findings.append(
+                f"summary.json: repeat_plates_count must be an int >= 0, "
+                f"got {repeat_plates!r}"
+            )
     return findings
 
 
