@@ -14,11 +14,13 @@ import csv
 import datetime as dt
 import html
 import json
+import os
 import re
 import shutil
 import sys
 from pathlib import Path
 
+from . import heatmap as heatmap_mod
 from .charts import hbar_chart, vbar_chart
 from .privacy_scan import PLATES_SECTION_RULES, scan_lines
 
@@ -135,6 +137,7 @@ PAGE = """<!DOCTYPE html>
 <li><a href="data/categories.csv">קטגוריות</a></li>
 <li><a href="data/streets.csv">רחובות</a></li>
 {plates_link}
+{heatmap_link}
 </ul>
 </section>
 </main>
@@ -237,7 +240,9 @@ def _read_plates(input_dir: Path) -> list[tuple[str, int]]:
     return plates
 
 
-def build_index(input_dir: Path, label: str, updated: str) -> str:
+def build_index(
+    input_dir: Path, label: str, updated: str, *, heatmap_available: bool = False
+) -> str:
     """Render the landing page from the aggregate output files."""
     summary = json.loads((input_dir / "summary.json").read_text(encoding="utf-8"))
     monthly = _read_counts(input_dir / "monthly.csv")
@@ -268,6 +273,11 @@ def build_index(input_dir: Path, label: str, updated: str) -> str:
     plates_link = (
         '<li><a href="data/plates.csv">רכבים חוזרים</a></li>' if plates else ""
     )
+    heatmap_link = (
+        '<li><a href="heatmap.html">מפת חום של מוקדים חמים</a></li>'
+        if heatmap_available
+        else ""
+    )
     return PAGE.format(
         css=CSS,
         cards="".join(cards),
@@ -276,6 +286,7 @@ def build_index(input_dir: Path, label: str, updated: str) -> str:
         streets_chart=hbar_chart(streets[:6]),
         plates_section=_plates_section(plates),
         plates_link=plates_link,
+        heatmap_link=heatmap_link,
         label=html.escape(label),
         updated=html.escape(updated),
     )
@@ -344,7 +355,40 @@ def check_shape(input_dir: Path) -> list[str]:
     return findings
 
 
-def publish(input_dir: Path, public_dir: Path, label: str) -> int:
+def _build_heatmap(
+    input_dir: Path, updated: str, geocoding: Path | None
+) -> dict[str, str] | None:
+    """Render heatmap.html + heatmap.json from floored street counts (#1).
+
+    Returns {} when there is nothing to map or no private mapping was
+    given (stale copies are removed by the caller), None on a data error.
+    Coordinates come only from the private mapping file passed with
+    --geocoding; it never enters this repository and the build stays
+    offline.
+    """
+    if geocoding is None:
+        return {}
+    try:
+        summary = json.loads((input_dir / "summary.json").read_text(encoding="utf-8"))
+        by_street = summary.get("by_street") or {}
+        if not isinstance(by_street, dict) or not by_street:
+            return {}
+        mapping = heatmap_mod.load_mapping(geocoding)
+        cells, _below, unmapped = heatmap_mod.build_cells(by_street, mapping)
+        if not cells:
+            return {}
+        return {
+            "heatmap.html": heatmap_mod.build_heatmap_html(cells, unmapped, updated),
+            "heatmap.json": heatmap_mod.build_heatmap_json(cells, unmapped, updated),
+        }
+    except (ValueError, KeyError, TypeError, OSError) as exc:
+        print(f"publish: heat map error: {exc}", file=sys.stderr)
+        return None
+
+
+def publish(
+    input_dir: Path, public_dir: Path, label: str, geocoding: Path | None = None
+) -> int:
     findings = scan_output(input_dir)
     # The label is free text that lands on the landing page; scan it with
     # the same privacy rules before anything is written.
@@ -354,8 +398,14 @@ def publish(input_dir: Path, public_dir: Path, label: str) -> int:
             print(f"publish: refused: {finding}", file=sys.stderr)
         return 1
     updated = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    heatmap_files = _build_heatmap(input_dir, updated, geocoding)
+    if heatmap_files is None:
+        print("publish: refused: heat map build failed", file=sys.stderr)
+        return 1
     try:
-        index_text = build_index(input_dir, label, updated)
+        index_text = build_index(
+            input_dir, label, updated, heatmap_available=bool(heatmap_files)
+        )
     except (ValueError, KeyError, TypeError) as exc:
         print(f"publish: refused: index build failed: {exc}", file=sys.stderr)
         return 1
@@ -369,8 +419,20 @@ def publish(input_dir: Path, public_dir: Path, label: str) -> int:
         for finding in index_findings:
             print(f"publish: refused: {finding}", file=sys.stderr)
         return 1
+    for name, text in heatmap_files.items():
+        findings = [str(f) for f in scan_lines(name, text.splitlines(), set())]
+        if findings:
+            for finding in findings:
+                print(f"publish: refused: {finding}", file=sys.stderr)
+            return 1
     data_dir = public_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
+    for name, text in heatmap_files.items():
+        target = data_dir / name if name.endswith(".json") else public_dir / name
+        target.write_text(text, encoding="utf-8")
+    for stale in (public_dir / "heatmap.html", data_dir / "heatmap.json"):
+        if not heatmap_files and stale.exists():
+            stale.unlink()
     shutil.copy2(input_dir / "report.html", public_dir / "report.html")
     for name in DATA_FILES:
         shutil.copy2(input_dir / name, data_dir / name)
@@ -403,8 +465,19 @@ def main(argv: list[str] | None = None) -> int:
         default="דיווחי 106 מצטברים",
         help="data-source label shown on the landing page",
     )
+    parser.add_argument(
+        "--geocoding",
+        type=Path,
+        default=(
+            Path(os.environ["PARKING_STATS_GEOCODING"])
+            if os.environ.get("PARKING_STATS_GEOCODING")
+            else None
+        ),
+        help="private street -> coordinate mapping JSON (build input, never "
+        "committed); without it the heat map is skipped",
+    )
     args = parser.parse_args(argv)
-    return publish(args.input, args.public, args.label)
+    return publish(args.input, args.public, args.label, args.geocoding)
 
 
 if __name__ == "__main__":
