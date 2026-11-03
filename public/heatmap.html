@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy"
- content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'">
+ content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' https://static.cloudflareinsights.com; connect-src https://cloudflareinsights.com">
 <title>מפת חום - דיווחי 106 ירושלים</title>
 <style>
 body { font-family: system-ui, sans-serif; margin: 0; color: #222; }
@@ -29,13 +29,13 @@ table { border-collapse: collapse; margin: 1rem 0; }
 th, td { border: 1px solid #ccc; padding: .3rem .8rem; text-align: right; }
 footer { padding: .6rem 1.5rem; color: #555; font-size: .85rem; }
 </style>
-</head>
+<script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "09082c7e7a524681805b17e4485d405e"}'></script></head>
 <body>
 <header>
 <h1>מפת חום - מוקדי דיווחים ברמת רחוב</h1>
 <p>רחובות עם 4 דיווחים ומעלה בלבד, ברזולוציה מעוגנת
 של כ-111 מטר. ספירות בלבד - ללא נתונים גולמיים, לוחיות רישוי או שמות.
-הדף מוגש כולו מאותו מקור: ללא סקריפטים של צד שלישי וללא בקשות חיצוניות.</p>
+הדף אינו טוען סקריפטים של צד שלישי מלבד מונה ביקורים אנונימי (Cloudflare Web Analytics) - ללא עוגיות וללא שמירת כתובות IP.</p>
 <p><a href="index.html">חזרה לדף הראשי</a></p>
 </header>
 <main>
@@ -44,5 +44,5 @@ footer { padding: .6rem 1.5rem; color: #555; font-size: .85rem; }
 <p>6 מוקדים נוספים מחוץ לתצוגה הראשונית - מופיעים בטבלה, ואפשר לראותם על המפה בעזרת הזזה או הקטנה.</p><p>רחוב נוסף אחד מעל הסף ללא מיפוי.</p>
 </main>
 <footer>נתונים מצטברים בלבד &middot; עודכן: 2026-11-01 16:58 UTC &middot; מפת הרקע: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> (ODbL)</footer>
-</body>
+<p style="text-align:center;color:#5a6b85;font-size:.85rem">פרטיות: ספירת ביקורים אנונימית (Cloudflare Web Analytics) בלבד - ללא עוגיות וללא שמירת כתובות IP.</p></body>
 </html>

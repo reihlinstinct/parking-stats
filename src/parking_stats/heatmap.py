@@ -699,7 +699,7 @@ def build_heatmap_html(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy"
- content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'">
+ content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' https://static.cloudflareinsights.com; connect-src https://cloudflareinsights.com">
 <title>מפת חום - דיווחי 106 ירושלים</title>
 <style>
 body {{ font-family: system-ui, sans-serif; margin: 0; color: #222; }}
@@ -730,7 +730,7 @@ footer {{ padding: .6rem 1.5rem; color: #555; font-size: .85rem; }}
 <h1>מפת חום - מוקדי דיווחים ברמת רחוב</h1>
 <p>רחובות עם {MIN_STREET_REPORTS} דיווחים ומעלה בלבד, ברזולוציה מעוגנת
 של כ-111 מטר. ספירות בלבד - ללא נתונים גולמיים, לוחיות רישוי או שמות.
-הדף מוגש כולו מאותו מקור: ללא סקריפטים של צד שלישי וללא בקשות חיצוניות.</p>
+הדף אינו טוען סקריפטים של צד שלישי מלבד מונה ביקורים אנונימי (Cloudflare Web Analytics) - ללא עוגיות וללא שמירת כתובות IP.</p>
 <p><a href="index.html">חזרה לדף הראשי</a></p>
 </header>
 <main>

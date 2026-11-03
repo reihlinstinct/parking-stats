@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -117,8 +118,13 @@ class HtmlTest(unittest.TestCase):
 
     def test_static_page_no_external_resources(self) -> None:
         page = self._html({"א": 9})
-        for forbidden in ("unpkg", "openstreetmap", "http://", "https://"):
+        for forbidden in ("unpkg", "openstreetmap", "http://"):
             self.assertNotIn(forbidden, page)
+        # The only https references are the analytics CSP origins (#32).
+        self.assertEqual(
+            sorted(set(re.findall(r"https://[a-z0-9.-]+", page))),
+            ["https://cloudflareinsights.com", "https://static.cloudflareinsights.com"],
+        )
         # The only script is the first-party zoom/pan helper, same-origin.
         self.assertEqual(page.count("<script"), 1)
         self.assertIn('<script src="data/map.js" defer></script>', page)
@@ -339,8 +345,9 @@ class BasemapGradient23Test(unittest.TestCase):
         self.assertIn('class="legend"', page)
         self.assertIn(">א</text>", page)  # street label on the cell
         self.assertNotIn("unpkg", page)
-        # The single permitted URL is the ODbL attribution anchor.
-        self.assertEqual(page.count("https://"), 1)
+        # Permitted URLs: the ODbL attribution anchor plus the analytics
+        # CSP origins (#32).
+        self.assertEqual(page.count("https://"), 3)
         self.assertNotIn("http://", page)
 
     def test_without_basemap_no_path_or_attribution(self) -> None:

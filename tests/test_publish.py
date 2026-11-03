@@ -43,6 +43,26 @@ class PublishTest(unittest.TestCase):
             self.assertIn('href="report.html"', index)
             self.assertIn('href="data/summary.json"', index)
 
+    def test_publish_adds_analytics_beacon_and_disclosure(self):
+        # Issue #32: published pages carry the anonymous Cloudflare Web
+        # Analytics beacon and a visible privacy disclosure; the counter
+        # is injected after the privacy scan and is idempotent.
+        with tempfile.TemporaryDirectory() as tmp:
+            public = Path(tmp) / "public"
+            self.assertEqual(
+                publish(make_input(FILES), public, "נתוני דוגמה סינתטיים"), 0
+            )
+            for name in ("index.html", "report.html"):
+                page = (public / name).read_text(encoding="utf-8")
+                self.assertEqual(page.count("cloudflareinsights.com/beacon"), 1, name)
+                self.assertIn("Cloudflare Web Analytics", page, name)
+            # A second publish over an already-instrumented report must
+            # not duplicate the beacon.
+            code = publish(make_input(FILES), public, "נתוני דוגמה סינתטיים")
+            self.assertEqual(code, 0)
+            page = (public / "index.html").read_text(encoding="utf-8")
+            self.assertEqual(page.count("cloudflareinsights.com/beacon"), 1)
+
     def test_missing_input_file_is_refused(self):
         files = dict(FILES)
         del files["report.html"]
