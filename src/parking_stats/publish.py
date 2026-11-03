@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 from . import heatmap as heatmap_mod
+from .analytics import add_analytics
 from .charts import hbar_chart, vbar_chart
 from .privacy_scan import PLATES_SECTION_RULES, scan_lines
 
@@ -445,6 +446,7 @@ def publish(
         for finding in index_findings:
             print(f"publish: refused: {finding}", file=sys.stderr)
         return 1
+    index_text = add_analytics(index_text)
     for name, text in heatmap_files.items():
         findings = [str(f) for f in scan_lines(name, text.splitlines(), set())]
         if findings:
@@ -457,6 +459,8 @@ def publish(
         target = data_dir / name if name.endswith(".json") else public_dir / name
         if name.startswith("data/"):
             target = public_dir / name
+        if name.endswith(".html"):
+            text = add_analytics(text)
         target.write_text(text, encoding="utf-8")
     for stale in (
         public_dir / "heatmap.html",
@@ -469,7 +473,12 @@ def publish(
         # The basemap is inlined into heatmap.html since #28; a stale
         # standalone basemap.svg from an older build is removed.
         (data_dir / "basemap.svg").unlink()
-    shutil.copy2(input_dir / "report.html", public_dir / "report.html")
+    # report.html is generated upstream and only copied here; add the
+    # counter idempotently so republishes keep it and the disclosure.
+    report_text = (input_dir / "report.html").read_text(encoding="utf-8")
+    (public_dir / "report.html").write_text(
+        add_analytics(report_text), encoding="utf-8"
+    )
     for name in DATA_FILES:
         shutil.copy2(input_dir / name, data_dir / name)
     copied = len(REQUIRED)
