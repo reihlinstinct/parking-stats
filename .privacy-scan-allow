@@ -11,4 +11,9 @@ src/parking_stats/publish.py raw-export-key
 public/data/plates.csv plate plate-compact
 # Generated landing page: plate rules are waived only between balanced
 # repeat-plates markers; the rest of the page stays fully scanned.
-public/index.html section:plates
+# Cloudflare Web Analytics beacon token: a public, non-secret site
+# identifier shipped to every visitor (like a GA measurement ID). The hex
+# string trips the phone-bare pattern; all other rules still apply.
+public/index.html section:plates phone-bare
+public/heatmap.html phone-bare
+public/report.html phone-bare
