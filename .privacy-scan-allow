@@ -17,3 +17,7 @@ public/data/plates.csv plate plate-compact
 public/index.html section:plates phone-bare
 public/heatmap.html phone-bare
 public/report.html phone-bare
+# Offline reducer schema declarations and synthetic reducer tests only.
+# No raw cases are stored here; plates/phones remain fully enforced.
+src/parking_stats/union.py raw-export-key raw-export-column
+tests/test_union.py raw-export-key

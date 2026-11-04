@@ -16,7 +16,7 @@ from typing import Any
 from .privacy_scan import scan_lines
 
 CASE = re.compile(r"[0-9]{4}-[0-9]{7}(?:/[1-9][0-9]{0,3})?", re.ASCII)
-FIELDS = frozenset({"createdon", "ClosedDateIncident", "streetname", "subjectname"})
+FIELDS = frozenset({"createdon", "streetname", "subjectname"} | {"ClosedDateIncident"})
 ORIGINS = frozenset({"email_export", "ledger", "city_email"})
 MAX_CASES = 100_000
 PUBLIC_KEYS = frozenset(
@@ -52,8 +52,8 @@ def _day(value: Any) -> str:
 
 def _event(event: Any) -> dict[str, Any]:
     if not isinstance(event, dict) or set(event) != {
-        "case_number",
         "origin",
+        "case_number",
         "source_id",
         "observed_at",
         "fields",
@@ -111,12 +111,14 @@ def reduce_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "incidents": [
-            {"case_number": ref, "sources": cases[ref]} for ref in sorted(cases)
+            dict(case_number=ref, sources=cases[ref]) for ref in sorted(cases)
         ],
     }
 
 
 def _labels(labels: set[str]) -> None:
+    if not isinstance(labels, set):
+        raise UnionError("label_policy")
     if len(labels) > 5000:
         raise UnionError("label_limit")
     for label in labels:
@@ -195,7 +197,9 @@ def validate_aggregate(
     """Strict public contract; rejects extras and attacker-controlled labels."""
     _labels(streets)
     _labels(categories)
-    if set(payload) != PUBLIC_KEYS or type(payload["schema_version"]) is not int:
+    if not isinstance(payload, dict) or set(payload) != PUBLIC_KEYS:
+        raise UnionError("public_schema")
+    if type(payload["schema_version"]) is not int:
         raise UnionError("public_schema")
     if payload["schema_version"] != 1 or payload["basis"] != (
         "recovered_case_identifiers_not_certified"

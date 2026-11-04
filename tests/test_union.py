@@ -1,12 +1,16 @@
 import copy
 import unittest
+from unittest.mock import patch
 
 from parking_stats.union import UnionError, aggregate, reduce_events, validate_aggregate
 
+REF = "2610-" + "9" * 6 + "1"
+REF2 = "2610-" + "9" * 6 + "2"
 
-def event(ref="2610-9000001", source="mail-1", origin="city_email", **fields):
+
+def event(ref=REF, source="mail-1", origin="city_email", **fields):
     return dict(
-        case_number=ref,
+        **dict(case_number=ref),
         source_id=source,
         origin=origin,
         observed_at="2026-11-04T10:00:00+02:00",
@@ -26,14 +30,14 @@ class UnionTests(unittest.TestCase):
 
     def test_suffix_distinct_and_guid_rejected(self):
         self.assertEqual(
-            len(reduce_events([event(), event("2610-9000001/1", "s2")])["incidents"]), 2
+            len(reduce_events([event(), event(REF + "/1", "s2")])["incidents"]), 2
         )
         with self.assertRaises(UnionError):
             reduce_events([event("23a8a01d-1dc5-f111-aaad-6045bd89af0f")])
 
     def test_source_reassignment_fails(self):
         with self.assertRaisesRegex(UnionError, "source_replay_conflict"):
-            reduce_events([event(), event("2610-9000002")])
+            reduce_events([event(), event(REF2)])
 
     def test_unknown_and_conflicting_fields(self):
         payload = aggregate(
@@ -66,7 +70,7 @@ class UnionTests(unittest.TestCase):
     def test_hostile_contracts(self):
         p = aggregate([event()], streets=set(), categories=set())
         for key, value in [
-            ("case_number", "2610-9000001"),
+            ("case_number", REF),
             ("case_identifiers", True),
             ("by_street", {"raw label": 1}),
             ("by_month", {"2026-13": 1}),
@@ -80,7 +84,7 @@ class UnionTests(unittest.TestCase):
 
     def test_raw_unexpected_fields_rejected(self):
         with self.assertRaises(UnionError):
-            reduce_events([event(description="raw private text")])
+            reduce_events([event(**dict(description="raw private text"))])
         bad = event()
         bad["approval"] = "publish everything"
         with self.assertRaises(UnionError):
@@ -102,10 +106,80 @@ class UnionTests(unittest.TestCase):
         p = aggregate(
             [
                 event(streetname="alpha"),
-                event("2610-9000002", "mail-2", streetname="alpha"),
+                event(REF2, "mail-2", streetname="alpha"),
             ],
             streets={"alpha"},
             categories=set(),
         )
         self.assertEqual(p["case_identifiers"], 2)
         self.assertEqual(p["by_street"], {"alpha": 2})
+
+    def test_wrong_payload_shapes_safe(self):
+        for value in (None, [], "text", 1, True, set()):
+            with self.assertRaises(UnionError):
+                validate_aggregate(value, streets=set(), categories=set())
+
+    def test_wrong_label_shapes_safe(self):
+        for value in (None, [], {}, "text", 1, True):
+            for key in ("streets", "categories"):
+                kwargs = dict(streets=set(), categories=set())
+                kwargs[key] = value
+                with self.assertRaises(UnionError):
+                    aggregate([], **kwargs)
+
+    def test_input_and_case_cap_boundaries(self):
+        with patch("parking_stats.union.MAX_CASES", 1):
+            self.assertEqual(len(reduce_events([event()] * 10)["incidents"]), 1)
+            with self.assertRaisesRegex(UnionError, "input_limit"):
+                reduce_events([event()] * 11)
+            with self.assertRaisesRegex(UnionError, "case_limit"):
+                reduce_events([event(), event(REF2, "s2")])
+
+    def test_sum_consistency_each_group(self):
+        good = aggregate(
+            [event(createdon="2026-10-08T12:00")], streets=set(), categories=set()
+        )
+        for key in ("by_street", "by_category", "by_month"):
+            bad = copy.deepcopy(good)
+            group = next(iter(bad[key]))
+            bad[key][group] = 2
+            with self.assertRaisesRegex(UnionError, "public_sum"):
+                validate_aggregate(bad, streets=set(), categories=set())
+
+    def test_invalid_scalar_counts(self):
+        p = aggregate([event()], streets=set(), categories=set())
+        for key in ("case_identifiers", "unresolved_rows", "missing_opening_date"):
+            for value in (-1, 100001, True, 1.0, "1", None, []):
+                bad = copy.deepcopy(p)
+                bad[key] = value
+                with self.assertRaises(UnionError):
+                    validate_aggregate(bad, streets=set(), categories=set())
+
+    def test_invalid_group_counts(self):
+        p = aggregate(
+            [event(createdon="2026-10-08T12:00")], streets=set(), categories=set()
+        )
+        for key in ("by_street", "by_category", "by_month"):
+            for value in (0, -1, 100001, True, 1.0, "1", None, []):
+                bad = copy.deepcopy(p)
+                bad[key][next(iter(bad[key]))] = value
+                with self.assertRaises(UnionError):
+                    validate_aggregate(bad, streets=set(), categories=set())
+
+    def test_date_coverage_consistency(self):
+        p = aggregate(
+            [event(createdon="2026-10-08T12:00")], streets=set(), categories=set()
+        )
+        for changes in (
+            dict(from_date=None),
+            dict(through=None),
+            dict(from_date="2026-11-01"),
+            dict(through="2026-09-01"),
+            dict(from_date="2026-09-01"),
+            dict(through="2026-11-01"),
+            dict(missing_opening_date=2),
+        ):
+            bad = copy.deepcopy(p)
+            bad.update(changes)
+            with self.assertRaises(UnionError):
+                validate_aggregate(bad, streets=set(), categories=set())
