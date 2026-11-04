@@ -25,3 +25,7 @@ tests/test_union.py raw-export-key
 # Archived landing page with an added archive notice: preserve its existing plate section
 # and public analytics token allowances, never widen the new landing page.
 public/historical.html section:plates phone-bare
+# Offline adapter schema declarations and synthetic adapter fixtures only.
+# All plate/phone rules remain active, as do all public output scans.
+src/parking_stats/private_builder.py raw-export-key
+tests/test_private_builder.py raw-export-key
