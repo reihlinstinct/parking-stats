@@ -29,3 +29,6 @@ public/historical.html section:plates phone-bare
 # All plate/phone rules remain active, as do all public output scans.
 src/parking_stats/private_builder.py raw-export-key
 tests/test_private_builder.py raw-export-key
+# Reviewed public integrity hashes of encrypted/union bytes, not plates.
+# Rule scoped: phone and raw-export checks remain active.
+config/parking-source.json plate-compact
