@@ -91,7 +91,8 @@ jobs:
           if-no-files-found: error
           retention-days: 3
       - name: Candidate summary
-        run: printf '%s\n' 'Candidate only: strict aggregates validated. No repository writes or publication. Review and data PR remain manual; email source is historical.' >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          printf '%s\n' 'Candidate only: strict aggregates validated. No repository writes or publication. Review and data PR remain manual; email source is historical.' >> "$GITHUB_STEP_SUMMARY"
       - name: Always remove private material
         if: always()
         run: |
