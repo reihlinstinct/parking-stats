@@ -47,9 +47,11 @@ main and pinned-baseline reads, with no automatic retry. Each fetch also disable
 tags. A 200MiB combined on-disk checkout/object budget is checked during child
 execution and at completion; excess aborts before candidate generation. This is
 an operational guard, not a hard OS/network byte quota (one poll interval can
-overshoot). No blob filtering is used: full required files remain available to
-the adapter without hidden lazy network reads. If actual legitimate input exceeds
-the size cap, report the fixed size_limit code rather than silently widening it.
+overshoot). Partial blob:none fetches intentionally omit unrelated blobs. Lazy
+blob reads occur only during bounded selection of the ledger, validated report
+JSON references and pinned ciphertext. The adapter receives materialized files
+and performs no network reads. Missing or legacy references fail closed; input
+above the size cap reports size_limit rather than silently widening it.
 Public diagnostics distinguish fixed fetch stage and timeout/nonzero_exit/other
 codes only, never git stderr, command, token, private path or revision. The earlier
 90-second event is only a timeout hypothesis until a new diagnostic confirms it.
