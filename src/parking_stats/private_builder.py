@@ -18,12 +18,17 @@ MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_TOTAL_BYTES = 100 * 1024 * 1024
 
 
+class Budget:
+    def __init__(self) -> None:
+        self.total = 0
+
+
 class Reader:
-    def __init__(self, root: Path):
-        if root.is_symlink() or not root.is_dir():
+    def __init__(self, root: Path, budget: Budget | None = None):
+        if any(p.is_symlink() for p in (root, *root.parents)) or not root.is_dir():
             raise UnionError("input_root")
         self.root = root
-        self.total = 0
+        self.budget = budget if budget is not None else Budget()
 
     def text(self, relative: str) -> str:
         parts = Path(relative).parts
@@ -42,8 +47,8 @@ class Reader:
             info = path.stat()
             if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE_BYTES:
                 raise UnionError("input_size_or_type")
-            self.total += info.st_size
-            if self.total > MAX_TOTAL_BYTES:
+            self.budget.total += info.st_size
+            if self.budget.total > MAX_TOTAL_BYTES:
                 raise UnionError("input_total_size")
             return path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
@@ -94,8 +99,9 @@ def build(
     pin the checkout and verify/decrypt ciphertext before invoking this adapter.
     """
     observed = _timestamp(ledger_observed_at)
-    private = Reader(private_root)
-    plain = Reader(decrypted_root)
+    budget = Budget()
+    private = Reader(private_root, budget)
+    plain = Reader(decrypted_root, budget)
     baseline = plain.obj("reports_raw_recovered_union.json")
     snapshot = _timestamp(baseline.get("snapshot_at"))
     incidents = baseline.get("incidents")
@@ -123,9 +129,16 @@ def build(
     if not isinstance(conflicts, list) or len(conflicts) > MAX_CASES:
         raise UnionError("baseline_conflicts")
     for item in conflicts:
-        if not isinstance(item, dict) or item.get("field") not in FIELDS:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("field"), str)
+            or item["field"] not in FIELDS
+        ):
             raise UnionError("baseline_conflict")
-        if item.get("case_number") not in refs:
+        if (
+            not isinstance(item.get("case_number"), str)
+            or item["case_number"] not in refs
+        ):
             raise UnionError("conflict_unknown_case")
         mid = item.get("message_id")
         if not isinstance(mid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", mid):
@@ -139,12 +152,44 @@ def build(
                 fields={item["field"]: item.get("email_value")},
             )
         )
-    rows = list(csv.DictReader(io.StringIO(private.text("ledger/reports.csv"))))
-    if len(rows) > MAX_CASES:
-        raise UnionError("ledger_limit")
+    csv_text = private.text("ledger/reports.csv")
+    try:
+        csv_input = csv.DictReader(io.StringIO(csv_text), strict=True)
+        headers = csv_input.fieldnames
+    except csv.Error:
+        raise UnionError("ledger_csv") from None
+    required = {
+        "folder_id",
+        "filed_date",
+        "municipal_ref",
+        "street",
+        "city_opened_at",
+        "ref_mapping",
+        "metadata_record",
+        "municipal_event_number",
+    }
+    if (
+        not headers
+        or len(headers) != len(set(headers))
+        or any(not h for h in headers)
+        or not required <= set(headers)
+    ):
+        raise UnionError("ledger_headers")
+    try:
+        rows: list[dict[str | Any, Any]] = []
+        for row in csv_input:
+            if len(rows) >= MAX_CASES:
+                raise UnionError("ledger_limit")
+            rows.append(row)
+    except csv.Error:
+        raise UnionError("ledger_csv") from None
+    if not rows:
+        raise UnionError("ledger_empty")
     folders: set[str] = set()
     unresolved: set[str] = set()
     for row in rows:
+        if any(value is None for key, value in row.items() if key is not None):
+            raise UnionError("ledger_short_row")
         extra = row.pop(None, [])
         if any(extra):
             raise UnionError("ledger_overflow")

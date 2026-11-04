@@ -149,3 +149,124 @@ class PrivateBuilderTests(unittest.TestCase):
         self.write()
         p, _ = self.run_build()
         self.assertEqual(p["by_street"], {"other_or_unknown": 1})
+
+    def test_duplicate_missing_and_empty_headers(self):
+        path = self.private / "ledger/reports.csv"
+        for text in (
+            "folder_id,municipal_ref,municipal_ref\nrow1,x,\n",
+            "folder_id\nrow1\n",
+            ",folder_id\nx,row1\n",
+            "",
+        ):
+            path.write_text(text)
+            with self.assertRaises(UnionError):
+                self.run_build()
+        self.write()
+        path.write_text(path.read_text().splitlines()[0] + "\n")
+        with self.assertRaisesRegex(UnionError, "ledger_empty"):
+            self.run_build()
+
+    def test_short_row_rejected(self):
+        path = self.private / "ledger/reports.csv"
+        text = path.read_text().splitlines()[0] + "\nrow1\n"
+        path.write_text(text)
+        with self.assertRaisesRegex(UnionError, "ledger_short_row"):
+            self.run_build()
+
+    def test_shared_byte_budget(self):
+        baseline_size = (self.plain / "reports_raw_recovered_union.json").stat().st_size
+        ledger_size = (self.private / "ledger/reports.csv").stat().st_size
+        with patch(
+            "parking_stats.private_builder.MAX_TOTAL_BYTES", baseline_size + ledger_size
+        ):
+            self.run_build()
+        with patch(
+            "parking_stats.private_builder.MAX_TOTAL_BYTES",
+            baseline_size + ledger_size - 1,
+        ):
+            with self.assertRaisesRegex(UnionError, "input_total_size"):
+                self.run_build()
+
+    def test_wrong_conflict_key_types_safe(self):
+        for value in ([], {}, None, True):
+            self.baseline["conflicts"] = [
+                dict(
+                    case_number=value,
+                    field="streetname",
+                    email_value="beta",
+                    message_id="msg1",
+                )
+            ]
+            self.write()
+            with self.assertRaises(UnionError):
+                self.run_build()
+            self.baseline["conflicts"] = [
+                dict(
+                    case_number=REF, field=value, email_value="beta", message_id="msg1"
+                )
+            ]
+            self.write()
+            with self.assertRaises(UnionError):
+                self.run_build()
+
+    def test_symlink_root_ancestor_rejected(self):
+        alias = self.root / "alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaisesRegex(UnionError, "input_root"):
+            Reader(alias / "private")
+
+    def test_streamed_row_cap_boundaries(self):
+        with patch("parking_stats.private_builder.MAX_CASES", 1):
+            self.run_build()
+            other = copy.deepcopy(self.rows[0])
+            other["folder_id"] = "row2"
+            self.rows.append(other)
+            self.write()
+            with self.assertRaisesRegex(UnionError, "ledger_limit"):
+                self.run_build()
+
+    def test_fail_before_read_for_unsafe_and_large(self):
+        target = self.private / "target"
+        target.write_text("data")
+        linked = self.private / "link"
+        linked.symlink_to(target)
+        for path, limit in (("link", 100), ("../plain/file", 100), ("target", 3)):
+            with (
+                patch("parking_stats.private_builder.MAX_FILE_BYTES", limit),
+                patch.object(
+                    Path, "read_text", side_effect=AssertionError("read too early")
+                ) as read_text,
+                patch.object(
+                    Path, "read_bytes", side_effect=AssertionError("read too early")
+                ) as read_bytes,
+            ):
+                with self.assertRaises(UnionError):
+                    Reader(self.private).text(path)
+                read_text.assert_not_called()
+                read_bytes.assert_not_called()
+
+    def test_total_budget_fails_before_read_on_second_root(self):
+        from parking_stats.private_builder import Budget
+
+        first = self.private / "first"
+        second = self.plain / "second"
+        first.write_text("abc")
+        second.write_text("def")
+        budget = Budget()
+        a, b = Reader(self.private, budget), Reader(self.plain, budget)
+        with patch("parking_stats.private_builder.MAX_TOTAL_BYTES", 5):
+            self.assertEqual(a.text("first"), "abc")
+            with patch.object(
+                Path, "read_text", side_effect=AssertionError("read too early")
+            ) as spy:
+                with self.assertRaisesRegex(UnionError, "input_total_size"):
+                    b.text("second")
+                spy.assert_not_called()
+
+    def test_csv_error_sanitized(self):
+        with patch(
+            "parking_stats.private_builder.csv.DictReader",
+            side_effect=__import__("csv").Error("private input"),
+        ):
+            with self.assertRaises(UnionError):
+                self.run_build()
