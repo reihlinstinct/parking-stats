@@ -211,7 +211,7 @@ def scan_lines(
         )
         for rule, pattern in RULES.items():
             candidate = (
-                fingerprint.group(1)
+                normalize_line(fingerprint.group(1))
                 if fingerprint and rule == "plate-compact"
                 else normalised
             )

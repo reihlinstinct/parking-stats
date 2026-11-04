@@ -282,3 +282,10 @@ class FingerprintMetadataTests(unittest.TestCase):
         ):
             self.assertTrue(scan_lines(".gitleaksignore", [line], set()))
         self.assertTrue(scan_lines("other.txt", [valid], set()))
+
+
+class FingerprintPathNormalizationTests(unittest.TestCase):
+    def test_hidden_and_fullwidth_path_separators_are_scanned(self):
+        for separator in ("\u200b", "\uff3f"):
+            line = "a" * 40 + ":public/123" + separator + "4567.txt:generic-api-key:3"
+            self.assertTrue(scan_lines(".gitleaksignore", [line], set()))
