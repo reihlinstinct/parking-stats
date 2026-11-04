@@ -32,3 +32,7 @@ class RecoveredWorkflowTests(unittest.TestCase):
         self.assertIn("PARKING_SOURCE_READ_TOKEN", workflow)
         self.assertIn("PARKING_RECOVERED_AGE_IDENTITY", workflow)
         self.assertIn("if: always()", workflow)
+
+    def test_summary_shell_is_yaml_block_scalar(self):
+        workflow = (ROOT / ".github/workflows/recovered-refresh.yml").read_text()
+        self.assertIn("- name: Candidate summary\n        run: |\n", workflow)
