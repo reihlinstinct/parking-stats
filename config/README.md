@@ -41,3 +41,15 @@ stage/code guarantee. Do not pass source-derived argv. BaseException events such
 as KeyboardInterrupt/SystemExit are not caught by the diagnostic handler; the
 workflow's always cleanup still owns deletion on any process/job failure. The
 guarantee is not that every possible interpreter/runtime message is sanitized.
+
+Quiet fetch now shares a 300-second overall budget across both shallow depth-one
+main and pinned-baseline reads, with no automatic retry. Each fetch also disables
+tags. A 200MiB combined on-disk checkout/object budget is checked during child
+execution and at completion; excess aborts before candidate generation. This is
+an operational guard, not a hard OS/network byte quota (one poll interval can
+overshoot). No blob filtering is used: full required files remain available to
+the adapter without hidden lazy network reads. If actual legitimate input exceeds
+the size cap, report the fixed size_limit code rather than silently widening it.
+Public diagnostics distinguish fixed fetch stage and timeout/nonzero_exit/other
+codes only, never git stderr, command, token, private path or revision. The earlier
+90-second event is only a timeout hypothesis until a new diagnostic confirms it.
