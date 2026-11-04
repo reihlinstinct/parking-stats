@@ -268,3 +268,24 @@ class PlatesSectionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FingerprintMetadataTests(unittest.TestCase):
+    def test_only_validated_sha_metadata_is_exempt(self):
+        sha = "a" * 10 + "1234" + "567" + "b" * 23
+        valid = sha + ":public/index.html:generic-api-key:3"
+        self.assertEqual(scan_lines(".gitleaksignore", [valid], set()), [])
+        for line in (
+            valid + " private " + PLATE,
+            valid.replace(sha, "bad" + sha),
+            valid.replace("public/index.html", "private/" + PLATE),
+        ):
+            self.assertTrue(scan_lines(".gitleaksignore", [line], set()))
+        self.assertTrue(scan_lines("other.txt", [valid], set()))
+
+
+class FingerprintPathNormalizationTests(unittest.TestCase):
+    def test_hidden_and_fullwidth_path_separators_are_scanned(self):
+        for separator in ("\u200b", "\uff3f"):
+            line = "a" * 40 + ":public/123" + separator + "4567.txt:generic-api-key:3"
+            self.assertTrue(scan_lines(".gitleaksignore", [line], set()))
