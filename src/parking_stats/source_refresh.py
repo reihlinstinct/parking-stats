@@ -6,16 +6,22 @@ import argparse
 import hashlib
 import json
 import os
+import selectors
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .privacy_scan import scan_lines
 from .private_builder import Reader, build
-from .union import UnionError
+from .union import UnionError, validate_aggregate
+
+DECRYPT_OUTPUT_LIMIT = 20 * 1024 * 1024
+DECRYPT_ERROR_LIMIT = 65536
+DECRYPT_TIMEOUT = 60
 
 OUTPUTS = frozenset(
     {"public/data/recovered-summary.json", "public/data/source-freshness.json"}
@@ -84,7 +90,6 @@ def artifact_gate(root: Path) -> None:
     """Exactly two bounded public-schema files, never a workspace directory."""
     reader = Reader(root)
     config = reader.obj("config/parking-source.json")
-    from .union import validate_aggregate
 
     payload = reader.obj("public/data/recovered-summary.json")
     validate_aggregate(
@@ -100,6 +105,53 @@ def artifact_gate(root: Path) -> None:
 
 def semantic(value: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in value.items() if k != "ledger_observed_at"}
+
+
+def decrypt(ciphertext: bytes, identity: Path) -> bytes:
+    """Bound both pipes during age execution; kill on cap, failure or deadline."""
+    with tempfile.TemporaryFile() as source:
+        source.write(ciphertext)
+        source.seek(0)
+        process = subprocess.Popen(
+            ["age", "--decrypt", "--identity", str(identity)],
+            stdin=source,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        output = bytearray()
+        errors = 0
+        selector = selectors.DefaultSelector()
+        assert process.stdout is not None and process.stderr is not None
+        selector.register(process.stdout, selectors.EVENT_READ, "out")
+        selector.register(process.stderr, selectors.EVENT_READ, "err")
+        deadline = time.monotonic() + DECRYPT_TIMEOUT
+        try:
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise UnionError("decrypt_timeout")
+                for key, _ in selector.select(min(remaining, 1)):
+                    chunk = os.read(key.fd, 65536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                    elif key.data == "out":
+                        if len(output) + len(chunk) > DECRYPT_OUTPUT_LIMIT:
+                            raise UnionError("decrypt_output_limit")
+                        output.extend(chunk)
+                    else:
+                        errors += len(chunk)
+                        if errors > DECRYPT_ERROR_LIMIT:
+                            raise UnionError("decrypt_error_limit")
+            if process.wait(timeout=max(0.01, deadline - time.monotonic())):
+                raise UnionError("decrypt_failed")
+            return bytes(output)
+        finally:
+            selector.close()
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            process.stdout.close()
+            process.stderr.close()
 
 
 def refresh(
@@ -127,6 +179,13 @@ def refresh(
         raise UnionError("refresh_config")
     for key in ("cipher_sha256", "plaintext_sha256"):
         value = spec[key]
+        if isinstance(value, list):
+            if len(value) != 16 or any(
+                not isinstance(chunk, str) or len(chunk) != 4 for chunk in value
+            ):
+                raise UnionError("refresh_hash_config")
+            value = "".join(value)
+            spec[key] = value
         if (
             not isinstance(value, str)
             or len(value) != 64
@@ -168,19 +227,11 @@ def refresh(
     with tempfile.TemporaryDirectory(prefix="parking-decrypted-", dir=temporary) as raw:
         plainroot = Path(raw)
         os.chmod(plainroot, 0o700)
-        result = subprocess.run(
-            ["age", "--decrypt", "--identity", str(identity)],
-            input=ciphertext,
-            capture_output=True,
-            check=False,
-            timeout=60,
-        )
-        if result.returncode or len(result.stdout) > 20 * 1024 * 1024:
-            raise UnionError("decrypt_failed")
-        if hashlib.sha256(result.stdout).hexdigest() != spec["plaintext_sha256"]:
+        plaintext = decrypt(ciphertext, identity)
+        if hashlib.sha256(plaintext).hexdigest() != spec["plaintext_sha256"]:
             raise UnionError("plaintext_hash")
         baseline = plainroot / "reports_raw_recovered_union.json"
-        baseline.write_bytes(result.stdout)
+        baseline.write_bytes(plaintext)
         baseline.chmod(0o600)
         payload, meta = build(
             private,
@@ -188,6 +239,9 @@ def refresh(
             streets=set(spec["streets"]),
             categories=set(spec["categories"]),
             ledger_observed_at=observed,
+        )
+        validate_aggregate(
+            payload, streets=set(spec["streets"]), categories=set(spec["categories"])
         )
         freshness(meta)
         candidates = {
@@ -199,6 +253,8 @@ def refresh(
             for name, value in candidates.items()
         }
         for name, text in serialized.items():
+            if len(text.encode("utf-8")) > 512 * 1024:
+                raise UnionError("artifact_size")
             if scan_lines(name, text.splitlines(), set()):
                 raise UnionError("public_candidate_privacy")
         old_payload = Reader(public).obj("public/data/recovered-summary.json")

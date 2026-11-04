@@ -37,25 +37,10 @@ jobs:
           persist-credentials: false
       - name: Require reviewed source configuration
         run: test -f public-repo/config/parking-source.json
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: reihlinstinct/parking-reports
-          ref: main
-          path: private-source
-          token: ${{ secrets.PARKING_SOURCE_READ_TOKEN }}
-          persist-credentials: false
-          submodules: false
-          lfs: false
-      - name: Read immutable reviewed encrypted baseline
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: reihlinstinct/parking-reports
-          ref: 79db451eecba2fb61aa3ee449f866cc205010b3b
-          path: private-baseline
-          token: ${{ secrets.PARKING_SOURCE_READ_TOKEN }}
-          persist-credentials: false
-          submodules: false
-          lfs: false
+      - name: Quiet fixed private-source fetch
+        env:
+          PARKING_SOURCE_READ_TOKEN: ${{ secrets.PARKING_SOURCE_READ_TOKEN }}
+        run: python public-repo/scripts/fetch_parking_source.py
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.12'
@@ -76,8 +61,8 @@ jobs:
           unset AGE_IDENTITY
           python -m parking_stats.source_refresh \
             --public "$GITHUB_WORKSPACE/public-repo" \
-            --private "$GITHUB_WORKSPACE/private-source" \
-            --baseline "$GITHUB_WORKSPACE/private-baseline" \
+            --private "$RUNNER_TEMP/parking-private/current" \
+            --baseline "$RUNNER_TEMP/parking-private/baseline" \
             --config "$GITHUB_WORKSPACE/public-repo/config/parking-source.json" \
             --identity "$RUNNER_TEMP/parking-refresh/identity" \
             --temporary "$RUNNER_TEMP/parking-refresh" \
@@ -111,4 +96,4 @@ jobs:
         if: always()
         run: |
           rm -f -- "$GITHUB_WORKSPACE/public-repo/public/data/recovered-summary.json" "$GITHUB_WORKSPACE/public-repo/public/data/source-freshness.json"
-          rm -rf -- "$GITHUB_WORKSPACE/private-source" "$GITHUB_WORKSPACE/private-baseline" "$RUNNER_TEMP/parking-refresh"
+          rm -rf -- "$RUNNER_TEMP/parking-private" "$RUNNER_TEMP/parking-refresh"
