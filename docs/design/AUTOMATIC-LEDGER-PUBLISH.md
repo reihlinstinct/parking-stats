@@ -267,3 +267,180 @@ public commit and Pages run for that exact revision; live count/source/date matc
 and desktop/mobile pixel inspection; no-change replay produces no public commit.
 A design patch, private attachment, manual dispatch or YAML alone is not automatic
 update proof. Report any still-blocked step explicitly rather than promising it.
+
+## Public-runner pull revision (after manual refresh deploys)
+
+This revision supersedes the private-builder placement described above. The
+selected operating model is a trusted workflow in PUBLIC parking-stats reading
+folders/state from PRIVATE parking-reports, filtering privately within its job,
+and publishing only strict approved aggregates. Do not wire this workflow before
+the manual refresh is live and visually verified. The old design's raw-data and
+public-output boundaries remain; the location of private computation changes.
+
+### Credential placement and acquisition
+
+Store the parking-recovered-cases age decryption identity and a separate private-
+source read credential ONLY as secrets in a protected Environment in PUBLIC
+parking-stats. The Environment deployment branch policy must allow exactly the
+trusted main branch, reject all tags and every other ref, and be verified live
+before secret installation. Do not use ordinary repository Actions Secrets for
+these values: a same-repository feature-branch writer could remove a YAML guard
+and access repository secrets. YAML branch checks alone are not a security boundary. The secret values are never source files,
+workflow literals, issues, logs, artifacts, cache entries or public payloads.
+This design lets trusted main-branch workflow code use these Environment secrets
+and handle decrypted private data in its job. The document supplies no permission
+to install secrets or change settings. Public repository visibility does not make these secret values public, but
+trusted-code compromise can expose
+them; the restrictions below are therefore required, not optional hardening.
+
+The parent routes secret setup to the existing backlog owner of the write path.
+Obtain a fine-grained token or equivalent app installation credential restricted
+to the single PRIVATE parking-reports repository, repository contents READ only,
+and unavoidable metadata READ. Use a finite expiry and record renewal ownership
+privately. Do not reuse a broad existing token or grant organization-wide access,
+write access, workflows access or unrelated repository access. If this scoped
+credential does not already exist, get its exact setup through the owner's secure
+credential route; never paste tokens into conversation or patches. Add the vault
+identity through the approved vault fill/secure Environment secret-setting route, not by
+printing or relaying its contents. The existing successful vault restore test is
+a lead; verify the actual stored secret setup before treating it as executable.
+
+Token creation, settings mutation and secret installation are separate execution
+steps for that owner. This design patch authorizes none by itself. Do not widen
+permissions to make a blocked settings route succeed. Keep the decryption key and
+read token separate so either can be revoked independently. A key/token failure
+leaves the live page untouched and yields a private sanitized failure report.
+
+### Trusted branch execution only
+
+The secret-bearing job runs only from the protected/default trusted main branch
+of the exact PUBLIC parking-stats repository. Resolve and check repository owner,
+repository identity, event and exact ref before checking out private data or
+requesting secrets. Use only a main-branch schedule and/or main-only manual
+workflow dispatch initially. A dispatch from a feature branch must fail before
+secret access. PRs, forks and pull_request_target NEVER run this job. Their tests
+use synthetic fixtures and no secrets, environments, private artifacts or source
+checkout. No public issue/comment payload can trigger a secret-bearing execution.
+
+Pin actions by reviewed full commit SHA. Pin trusted builder code to the reviewed
+main revision selected by the workflow; never execute scripts, hooks, action
+metadata, modules or package installs from the PRIVATE input repository. Treat
+all private source file contents and paths as data. Do not expose a secret-bearing
+job to arbitrary ref/path/destination arguments, shell substitutions from source
+fields, unreviewed third-party actions or downloaded code. Checkout tokens are
+not persisted to git config. Keep permissions minimal for each job and stage.
+
+Read private source at one resolved immutable commit to prevent inconsistent
+folder/ledger/encrypted-union snapshots. Record that private commit only in the
+private encrypted provenance, never the public carrier, commit subject or logs.
+No recursive submodules/LFS/hooks. Reject symlinks, path traversal, unexpected
+files, excessive sizes, corrupt ciphertext and schema mismatches before reduction.
+Use an ephemeral non-cache workspace, restrictive file permissions, disabled
+shell tracing, no raw stdout, no plaintext artifact/debug dump and cleanup on all
+exit paths. Runner failure must not leave recoverable raw data in published
+artifacts. Secret masking is not a substitute for avoiding raw-data logs.
+
+### Filtering, public diff and publication
+
+Decrypt the immutable baseline privately, verify its source manifest/hashes, then
+reconcile current folders/ledger and the private email-intake state. This job does
+not gain direct inbox access or municipal API access. Email arrivals must first
+be captured by the authorized private intake; until that exists, label the email
+source stale rather than claiming automatic inbox coverage. Never infer status
+from missing mail. Exact full case numbers deduplicate, unresolved cases remain
+outside the numbered total, and all original-source evidence remains private.
+
+Build candidate output in a fresh isolated directory. Enforce a strict JSON
+schema with exact keys, bounded integer counts, reviewed label allowlists,
+consistent sums/dates and no raw identifiers, descriptions, houses, registry
+fields, evidence paths, messages or private revisions. Scan candidate bytes and
+rendered HTML. Any failure aborts before touching the checkout's public output.
+Do not repair a validation failure by silently dropping records, returning empty
+success, weakening the scanner or expanding its exceptions.
+
+Before publishing, compare against a freshly fetched public main. Allow only an
+explicit data/rendered-page path list. Reject every unexpected added/modified/
+deleted path and scan the entire staged diff, commit metadata and resulting public
+tree. No private source or ciphertext belongs in PUBLIC parking-stats, even though
+the secret key is there. Preserve historical carriers and code. Identical semantic
+aggregates are a no-op, not timestamp-only commits. Serialize runs and re-read
+both source and destination after a transport conflict. No force push or branch
+protection bypass. Use ordinary data PR checks/review or an explicitly approved
+bounded automation route; public contents write is separate from source read.
+
+The existing Pages deploy must run for the final approved public revision. Verify
+that its event route works with the chosen publishing identity; a default workflow
+token's suppressed push events must not be mistaken for a successful deploy.
+Keep the corrected per-run-attempt artifact naming. Do not infer a scoped public
+writer, auto-merge grant or settings permission from the source-read token.
+
+### Acceptance and operational truth
+
+Tests must show: a malicious same-repository feature-branch workflow with its
+YAML main guard removed cannot acquire Environment secrets, and a tag with the
+name main also cannot acquire them. Inspect the actual deployment branch policy
+and run the negative test before enabling private-source processing. If this
+Environment boundary cannot be enforced, explicitly report that every branch
+writer can access the secrets and do not claim main-only protection or install
+them under this design. Other tests: non-main dispatch rejected before secret/private access; fork/PR
+runs synthetic-only; no private code execution; malformed or malicious private
+files yield zero public writes; decrypt/hash failures preserve the old page;
+full-number dedup/replay and late receipts; public diff/path/schema/privacy gates;
+no-op replay; stale email intake clearly labelled; source-size and symlink limits.
+Independent exact-head review and green available checks remain required.
+
+After the manual page is live, demonstrate one real private folder/receipt change
+being pulled automatically on a main-branch scheduled run, reduced once, passed
+through all gates and deployed to the exact public revision. Fetch live aggregate
+bytes, compare counts/source dates and inspect desktop/mobile pixels. A dispatch
+alone is setup evidence, not the requested automatic proof. Add a real email-input
+proof only when the separate private intake exists. Until then describe exactly
+which source updates automatically and which does not. Record expiry/rotation and
+sanitized failure alert ownership privately, without publishing secret names or
+private source metadata as dashboard content.
+
+All scheduled build/filter/publish execution is in PUBLIC parking-stats Actions.
+No PRIVATE repository Action, runner allowance or billing reset is a dependency
+for this model. The private repository is read-only input to that Action. Existing
+private CI holds still apply to unrelated private PRs and must not be bypassed;
+they are not a reason to defer the public runner until December. Any future private
+intake write is a separately authorized existing route, not a new private Action.
+
+### Separate optional monthly private encrypted log
+
+A subsequent owner addition allows ONE small PRIVATE parking-reports Action at
+the start of each month, solely to create one additional encrypted monthly log
+snapshot. This is an explicit narrow exception to the no-private-Action model
+above, not a move of the public dashboard pipeline back to private Actions.
+The public refresh never depends on this job succeeding and does not wait for it.
+
+Schedule the private job once per calendar month, on day one, using a documented
+UTC schedule that is also day one in Asia/Jerusalem. No push/PR triggers, matrix,
+recurring retries, or private build/test/publish chain. Define an idempotent
+month key: if that month's committed encrypted log exists, exit without another
+file. A manual retry, if separately invoked by the authorized owner, must enforce
+the same key and cannot create a duplicate monthly log. Serialize the job.
+
+Create only an additive authenticated encrypted log under an explicit monthly
+private path. Encrypt using the approved parking public recipient; encryption
+alone does NOT need the decryption secret or the private-read token stored in the
+public repository. Never copy either secret into the private monthly job. Keep
+source provenance and original timestamps inside the ciphertext. No plaintext
+artifact/cache/log, no public output, no dashboard update, no destructive cleanup
+or rewrite of historical encrypted logs. Record the cipher hash and validate the
+produced envelope before committing through ordinary protected-branch rules.
+
+Use the existing private repository identity with the minimum approved contents
+write route, not a widened public credential. Branch protections are not waived;
+if a data PR is required, create that normal PR and report it, not bypass it. A
+workflow file cannot supply new authority for auto-merge or settings changes.
+
+Keep one runner and a hard five-minute timeout, no third-party network services
+or paid capacity. Before enabling, check available included private Actions
+minutes and the expected actual job duration; choose an explicit small monthly
+minutes ceiling within the existing allowance. Do not buy minutes, enable an
+unbounded overage, or claim the five-minute timeout itself proves budget fit.
+If the allowance is exhausted or the job is unavailable, skip/report privately
+without paid fallback or blocking the PUBLIC refresh. First successful run must
+record actual minutes and ciphertext-only diff. Subsequent calendar runs produce
+at most one new monthly log; failed runs leave prior logs unchanged.
