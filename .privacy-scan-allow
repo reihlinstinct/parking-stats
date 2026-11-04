@@ -21,3 +21,7 @@ public/report.html phone-bare
 # No raw cases are stored here; plates/phones remain fully enforced.
 src/parking_stats/union.py raw-export-key raw-export-column
 tests/test_union.py raw-export-key
+
+# Archived landing page with an added archive notice: preserve its existing plate section
+# and public analytics token allowances, never widen the new landing page.
+public/historical.html section:plates phone-bare
