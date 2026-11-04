@@ -3,6 +3,7 @@
 import base64
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,7 @@ def git(path, args, env, root, deadline, stage, capture=False):
             env=env,
             stdout=output if capture else subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
         try:
             while process.poll() is None:
@@ -70,8 +72,12 @@ def git(path, args, env, root, deadline, stage, capture=False):
             output.seek(0)
             return output.read(1025)
         finally:
-            if process.poll() is None:
-                process.kill()
+            # Git can leave remote-https/index-pack descendants alive even when
+            # its direct parent has exited. Terminate the dedicated whole group.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             process.wait()
 
 
