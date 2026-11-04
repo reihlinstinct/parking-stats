@@ -279,13 +279,18 @@ public-output boundaries remain; the location of private computation changes.
 
 ### Credential placement and acquisition
 
-Store the parking-recovered-cases age decryption identity as a repository Actions
-Secret in PUBLIC parking-stats settings, alongside a separate repository Actions
-Secret for private-source read access. The secret values are never source files,
+Store the parking-recovered-cases age decryption identity and a separate private-
+source read credential ONLY as secrets in a protected Environment in PUBLIC
+parking-stats. The Environment deployment branch policy must allow exactly the
+trusted main branch, reject all tags and every other ref, and be verified live
+before secret installation. Do not use ordinary repository Actions Secrets for
+these values: a same-repository feature-branch writer could remove a YAML guard
+and access repository secrets. YAML branch checks alone are not a security boundary. The secret values are never source files,
 workflow literals, issues, logs, artifacts, cache entries or public payloads.
-The user-approved trade-off is that trusted public workflow code can use these
-secrets and handle decrypted private data in its job. Public repository visibility
-does not make these secret values public, but trusted-code compromise can expose
+This design lets trusted main-branch workflow code use these Environment secrets
+and handle decrypted private data in its job. The document supplies no permission
+to install secrets or change settings. Public repository visibility does not make these secret values public, but
+trusted-code compromise can expose
 them; the restrictions below are therefore required, not optional hardening.
 
 The parent routes secret setup to the existing backlog owner of the write path.
@@ -296,7 +301,7 @@ privately. Do not reuse a broad existing token or grant organization-wide access
 write access, workflows access or unrelated repository access. If this scoped
 credential does not already exist, get its exact setup through the owner's secure
 credential route; never paste tokens into conversation or patches. Add the vault
-identity through the approved vault fill/secure secret-setting route, not by
+identity through the approved vault fill/secure Environment secret-setting route, not by
 printing or relaying its contents. The existing successful vault restore test is
 a lead; verify the actual stored secret setup before treating it as executable.
 
@@ -371,7 +376,13 @@ writer, auto-merge grant or settings permission from the source-read token.
 
 ### Acceptance and operational truth
 
-Tests must show: non-main dispatch rejected before secret/private access; fork/PR
+Tests must show: a malicious same-repository feature-branch workflow with its
+YAML main guard removed cannot acquire Environment secrets, and a tag with the
+name main also cannot acquire them. Inspect the actual deployment branch policy
+and run the negative test before enabling private-source processing. If this
+Environment boundary cannot be enforced, explicitly report that every branch
+writer can access the secrets and do not claim main-only protection or install
+them under this design. Other tests: non-main dispatch rejected before secret/private access; fork/PR
 runs synthetic-only; no private code execution; malformed or malicious private
 files yield zero public writes; decrypt/hash failures preserve the old page;
 full-number dedup/replay and late receipts; public diff/path/schema/privacy gates;
