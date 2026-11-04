@@ -1,4 +1,4 @@
-name: Recovered refresh dry run
+name: Recovered private-source refresh
 
 on:
   workflow_dispatch:
@@ -7,28 +7,93 @@ permissions:
   contents: read
 
 concurrency:
-  group: recovered-refresh-dry-run
+  group: recovered-private-source-refresh
   cancel-in-progress: false
 
 jobs:
-  synthetic-reducer:
-    if: github.repository == 'reihlinstinct/parking-stats' && github.ref == 'refs/heads/main'
+  refresh:
+    if: github.repository == 'reihlinstinct/parking-stats' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    environment: parking-source-main
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
+      - name: Verify trusted context
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -eu
+          test "$REPOSITORY" = reihlinstinct/parking-stats
+          test "$REF" = refs/heads/main
+          case "$EVENT" in schedule|workflow_dispatch) ;; *) exit 1 ;; esac
+          umask 077
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          path: public-repo
+          ref: main
           persist-credentials: false
+      - name: Require reviewed source configuration
+        run: test -f public-repo/config/parking-source.json
+      - name: Quiet fixed private-source fetch
+        env:
+          PARKING_SOURCE_READ_TOKEN: ${{ secrets.PARKING_SOURCE_READ_TOKEN }}
+        run: python public-repo/scripts/fetch_parking_source.py
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.12'
-      - name: Run synthetic reducer only
+      - name: Install system age
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq age >/dev/null
+      - name: Prepare ephemeral identity and candidate
+        env:
+          AGE_IDENTITY: ${{ secrets.PARKING_RECOVERED_AGE_IDENTITY }}
+          PYTHONPATH: public-repo/src
+        run: |
+          set -eu
+          umask 077
+          test -n "$AGE_IDENTITY"
+          mkdir -p "$RUNNER_TEMP/parking-refresh"
+          printf '%s\n' "$AGE_IDENTITY" > "$RUNNER_TEMP/parking-refresh/identity"
+          unset AGE_IDENTITY
+          python -m parking_stats.source_refresh \
+            --public "$GITHUB_WORKSPACE/public-repo" \
+            --private "$RUNNER_TEMP/parking-private/current" \
+            --baseline "$RUNNER_TEMP/parking-private/baseline" \
+            --config "$GITHUB_WORKSPACE/public-repo/config/parking-source.json" \
+            --identity "$RUNNER_TEMP/parking-refresh/identity" \
+            --temporary "$RUNNER_TEMP/parking-refresh" \
+            --observed "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
+      - name: Validate full public tree
+        working-directory: public-repo
         env:
           PYTHONPATH: src
-        run: python scripts/recovered_refresh_dry_run.py
-      - name: Verify tracked privacy boundary
+        run: |
+          python -m parking_stats.privacy_scan .
+          python -c 'from pathlib import Path; from parking_stats.source_refresh import diff_gate; diff_gate(Path("."))'
+          git diff --check
+      - name: Gate exact artifact paths and byte limits
+        working-directory: public-repo
         env:
           PYTHONPATH: src
-        run: python -m parking_stats.privacy_scan .
+        run: |
+          python -c 'from pathlib import Path; from parking_stats.source_refresh import artifact_gate; artifact_gate(Path("."))'
+      - name: Upload aggregate-only candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: recovered-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            public-repo/public/data/recovered-summary.json
+            public-repo/public/data/source-freshness.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Candidate summary
+        run: printf '%s\n' 'Candidate only: strict aggregates validated. No repository writes or publication. Review and data PR remain manual; email source is historical.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Always remove private material
+        if: always()
+        run: |
+          rm -f -- "$GITHUB_WORKSPACE/public-repo/public/data/recovered-summary.json" "$GITHUB_WORKSPACE/public-repo/public/data/source-freshness.json"
+          rm -rf -- "$RUNNER_TEMP/parking-private" "$RUNNER_TEMP/parking-refresh"

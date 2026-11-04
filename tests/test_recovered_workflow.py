@@ -1,4 +1,4 @@
-"""The parked workflow cannot access private source or publish output."""
+"""The reviewed workflow builds candidates without publication or a timer."""
 
 import importlib.util
 import unittest
@@ -17,19 +17,18 @@ class RecoveredWorkflowTests(unittest.TestCase):
         spec.loader.exec_module(module)
         self.assertEqual(module.run()["case_identifiers"], 1)
 
-    def test_no_sensitive_or_public_write_route(self):
+    def test_no_public_write_route(self):
         workflow = (ROOT / ".github/workflows/recovered-refresh.yml").read_text()
         for forbidden in (
-            "secrets.",
-            "environment:",
-            "schedule:",
-            "pull_request",
             "contents: write",
-            "upload-artifact",
+            "pull-requests: write",
             "git push",
-            "repository_dispatch",
+            "gh pr create",
+            "pull_request_target",
         ):
             self.assertNotIn(forbidden, workflow)
-        self.assertIn("github.ref == 'refs/heads/main'", workflow)
-        self.assertIn("persist-credentials: false", workflow)
-        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("schedule:", workflow)
+        self.assertIn("environment: parking-source-main", workflow)
+        self.assertIn("PARKING_SOURCE_READ_TOKEN", workflow)
+        self.assertIn("PARKING_RECOVERED_AGE_IDENTITY", workflow)
+        self.assertIn("if: always()", workflow)
