@@ -55,9 +55,10 @@ class Reader:
             raise UnionError("input_read") from None
 
     def obj(self, relative: str) -> dict[str, Any]:
+        text = self.text(relative)
         try:
-            obj = json.loads(self.text(relative), object_pairs_hook=_unique)
-        except (ValueError, RecursionError):
+            obj = json.loads(text, object_pairs_hook=_unique)
+        except (json.JSONDecodeError, RecursionError):
             raise UnionError("input_json") from None
         if not isinstance(obj, dict):
             raise UnionError("input_object")
