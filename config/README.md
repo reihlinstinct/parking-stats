@@ -33,3 +33,11 @@ write token or unattended publication. Existing live main is untouched. Artifact
 contains no ciphertext/private paths/hashes/manifests or raw logs. Upload retention
 is3days; alwayscleanup removes keys, plaintext, both private checkouts and local
 candidate files after upload/failure. Parent creates/reviews data PR separately.
+
+Diagnostic boundary: source_refresh.main sanitizes exceptions from the protected
+refresh execution only. Workflow supplies fixed trusted argv; argparse parsing
+happens before that protected try and its usage errors are not covered by the
+stage/code guarantee. Do not pass source-derived argv. BaseException events such
+as KeyboardInterrupt/SystemExit are not caught by the diagnostic handler; the
+workflow's always cleanup still owns deletion on any process/job failure. The
+guarantee is not that every possible interpreter/runtime message is sanitized.

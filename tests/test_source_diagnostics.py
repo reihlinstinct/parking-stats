@@ -79,3 +79,76 @@ class DiagnosticTests(unittest.TestCase):
             err.getvalue(),
             "source_refresh_failed_closed stage=private_build code=input_read\n",
         )
+
+    def test_main_unexpected_types_and_hostile_subclass_end_to_end(self):
+        import subprocess
+
+        class Hostile(UnionError):
+            def __str__(self):
+                return "PRIVATE subclass traceback content"
+
+        class HostileString(str):
+            def __str__(self):
+                return "PRIVATE custom string"
+
+        argv = ["refresh"]
+        for name in (
+            "public",
+            "private",
+            "config",
+            "identity",
+            "temporary",
+            "baseline",
+        ):
+            argv += ["--" + name, "unused"]
+        argv += ["--observed", "2026-11-04T12:00:00+02:00"]
+        cases = [
+            (Exception("PRIVATE general"), "unexpected_error"),
+            (OSError("PRIVATE path"), "system_io_error"),
+            (subprocess.SubprocessError("PRIVATE command"), "subprocess_error"),
+            (Hostile("input_read"), "unexpected_error"),
+            (UnionError(HostileString("input_read")), "unexpected_error"),
+            (UnionError(object()), "unexpected_error"),
+        ]
+        for error, code in cases:
+            with self.subTest(kind=type(error).__name__):
+
+                def fail(*args, **kwargs):
+                    _STAGE.set("private_build")
+                    raise error
+
+                out, err = io.StringIO(), io.StringIO()
+                with (
+                    patch("sys.argv", argv),
+                    patch("parking_stats.source_refresh.refresh", side_effect=fail),
+                    contextlib.redirect_stdout(out),
+                    contextlib.redirect_stderr(err),
+                ):
+                    self.assertEqual(main(), 1)
+                self.assertEqual(out.getvalue(), "")
+                self.assertEqual(
+                    err.getvalue(),
+                    "source_refresh_failed_closed stage=private_build code="
+                    + code
+                    + "\n",
+                )
+                self.assertNotIn("Traceback", err.getvalue())
+                self.assertNotIn("PRIVATE", err.getvalue())
+
+    def test_diagnostic_exact_types_for_custom_str_and_subclass(self):
+        class Custom(str):
+            def __str__(self):
+                raise AssertionError("must never stringify")
+
+        class Derived(UnionError):
+            pass
+
+        for error in (Derived("input_read"), UnionError(Custom("input_read"))):
+            self.assertEqual(
+                diagnostic(error, "private_build"),
+                "source_refresh_failed_closed stage=private_build code=unexpected_error",
+            )
+        self.assertEqual(
+            diagnostic(UnionError("input_read"), Custom("private_build")),
+            "source_refresh_failed_closed stage=startup code=input_read",
+        )
