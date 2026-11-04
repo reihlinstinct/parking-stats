@@ -22,10 +22,11 @@ PRs may not automatically trigger CI. A trusted owner must trigger required chec
 through an approved existing route. Pages runs on ordinary merged main. This
 candidate updates strict aggregate/freshness JSON only; HTML graph refresh remains
 a subsequent renderer integration, so no claim that current HTML auto-updates yet.
-The hourly schedule is a proposed real source read, not proof it has succeeded.
+This PR has manual dispatch only. A timer remains held until a reviewed manual
+E2E succeeds; a lower cadence matching the monthly intent needs a later review.
 
 
-Safe initial mode supersedes any earlier PR language: workflow has contents READ
+The agreed initial mode uses contents READ
 only and uploads exactly recovered-summary.json and source-freshness.json (each
 at most512KiB), after strict schema/privacy validation. No push, PR creation,
 write token or unattended publication. Existing live main is untouched. Artifact
