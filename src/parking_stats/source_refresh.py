@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,124 @@ from typing import Any
 from .privacy_scan import scan_lines
 from .private_builder import Reader, build
 from .union import UnionError, validate_aggregate
+
+DIAGNOSTIC_CODES = frozenset(
+    [
+        "artifact_privacy",
+        "artifact_size",
+        "baseline_case",
+        "baseline_conflict",
+        "baseline_conflicts",
+        "baseline_duplicate_or_key",
+        "baseline_incidents",
+        "case_limit",
+        "case_number",
+        "cipher_hash",
+        "cipher_path",
+        "cipher_size",
+        "cipher_symlink",
+        "conflict_source",
+        "conflict_unknown_case",
+        "decrypt_error_limit",
+        "decrypt_failed",
+        "decrypt_output_limit",
+        "decrypt_timeout",
+        "duplicate_json_key",
+        "event_schema",
+        "field_schema",
+        "field_value",
+        "freshness_mode",
+        "freshness_privacy",
+        "freshness_schema",
+        "freshness_time",
+        "freshness_version",
+        "input_json",
+        "input_limit",
+        "input_object",
+        "input_path",
+        "input_read",
+        "input_root",
+        "input_size_or_type",
+        "input_symlink",
+        "input_total_size",
+        "invalid_date",
+        "label_limit",
+        "label_policy",
+        "label_privacy",
+        "ledger_csv",
+        "ledger_duplicate_folder",
+        "ledger_empty",
+        "ledger_filed_date",
+        "ledger_folder",
+        "ledger_headers",
+        "ledger_limit",
+        "ledger_overflow",
+        "ledger_record_path",
+        "ledger_reference",
+        "ledger_reference_conflict",
+        "ledger_short_row",
+        "origin",
+        "plaintext_hash",
+        "public_basis",
+        "public_candidate_privacy",
+        "public_count",
+        "public_date_coverage",
+        "public_dates",
+        "public_git",
+        "public_group_count",
+        "public_labels",
+        "public_missing_count",
+        "public_month",
+        "public_months",
+        "public_privacy",
+        "public_schema",
+        "public_sum",
+        "refresh_cipher_path",
+        "refresh_config",
+        "refresh_hash_config",
+        "refresh_labels",
+        "snapshot_time",
+        "snapshot_timezone",
+        "source_id",
+        "source_replay_conflict",
+        "unexpected_public_diff",
+        "unresolved_count",
+        "unresolved_row",
+        "unresolved_schema",
+    ]
+)
+STAGES = frozenset(
+    {
+        "startup",
+        "configuration",
+        "cipher_read",
+        "public_precheck",
+        "decrypt",
+        "plaintext_verify",
+        "private_build",
+        "candidate_validate",
+        "existing_compare",
+        "candidate_write",
+        "public_postcheck",
+    }
+)
+_STAGE: ContextVar[str] = ContextVar("refresh_stage", default="startup")
+
+
+def diagnostic(error: BaseException, stage: str) -> str:
+    """Emit only literal enumerated values, never exception prose or source values."""
+    safe_stage = stage if type(stage) is str and stage in STAGES else "startup"
+    code = "unexpected_error"
+    if type(error) is UnionError and len(error.args) == 1:
+        arg = error.args[0]
+        if type(arg) is str and arg in DIAGNOSTIC_CODES:
+            code = arg
+    elif isinstance(error, OSError):
+        code = "system_io_error"
+    elif isinstance(error, subprocess.SubprocessError):
+        code = "subprocess_error"
+    return "source_refresh_failed_closed stage=" + safe_stage + " code=" + code
+
 
 DECRYPT_OUTPUT_LIMIT = 20 * 1024 * 1024
 DECRYPT_ERROR_LIMIT = 65536
@@ -168,6 +287,7 @@ def refresh(
     Trusted config must pin cipher and plaintext hashes. No PR/private data may
     select commands, output paths, decryption flags or public label policy.
     """
+    _STAGE.set("configuration")
     spec = Reader(config.parent).obj(config.name)
     if set(spec) != {
         "cipher_path",
@@ -202,6 +322,7 @@ def refresh(
         raise UnionError("refresh_cipher_path")
     # Reader checks every parent/symlink, type and bounds before loading bytes.
     # age ASCII armor is required, so the existing bounded UTF-8 reader applies.
+    _STAGE.set("cipher_read")
     source = baseline_root if baseline_root is not None else private
     Reader(source)
     # Validate the path/symlinks/type/size before binary read. Immutable checkout.
@@ -223,16 +344,20 @@ def refresh(
     if hashlib.sha256(ciphertext).hexdigest() != spec["cipher_sha256"]:
         raise UnionError("cipher_hash")
 
+    _STAGE.set("public_precheck")
     diff_gate(public)
     with tempfile.TemporaryDirectory(prefix="parking-decrypted-", dir=temporary) as raw:
         plainroot = Path(raw)
         os.chmod(plainroot, 0o700)
+        _STAGE.set("decrypt")
         plaintext = decrypt(ciphertext, identity)
+        _STAGE.set("plaintext_verify")
         if hashlib.sha256(plaintext).hexdigest() != spec["plaintext_sha256"]:
             raise UnionError("plaintext_hash")
         baseline = plainroot / "reports_raw_recovered_union.json"
         baseline.write_bytes(plaintext)
         baseline.chmod(0o600)
+        _STAGE.set("private_build")
         payload, meta = build(
             private,
             plainroot,
@@ -240,6 +365,7 @@ def refresh(
             categories=set(spec["categories"]),
             ledger_observed_at=observed,
         )
+        _STAGE.set("candidate_validate")
         validate_aggregate(
             payload, streets=set(spec["streets"]), categories=set(spec["categories"])
         )
@@ -257,6 +383,7 @@ def refresh(
                 raise UnionError("artifact_size")
             if scan_lines(name, text.splitlines(), set()):
                 raise UnionError("public_candidate_privacy")
+        _STAGE.set("existing_compare")
         old_payload = Reader(public).obj("public/data/recovered-summary.json")
         meta_path = public / "public/data/source-freshness.json"
         old_meta = (
@@ -271,6 +398,7 @@ def refresh(
         # Complete all validation before any destination mutation. Files are
         # atomically replaced individually; only a later single git commit/PR
         # can publish the multi-file set, never this local candidate checkout.
+        _STAGE.set("candidate_write")
         for name, text in serialized.items():
             target = public / name
             with tempfile.NamedTemporaryFile(
@@ -279,6 +407,7 @@ def refresh(
                 f.write(text)
                 staged = Path(f.name)
             os.replace(staged, target)
+        _STAGE.set("public_postcheck")
         diff_gate(public)
         return True
 
@@ -289,6 +418,7 @@ def main() -> int:
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--observed", required=True)
     args = parser.parse_args()
+    _STAGE.set("startup")
     try:
         changed = refresh(
             args.public,
@@ -301,8 +431,8 @@ def main() -> int:
         )
         print("candidate_changed" if changed else "semantic_noop")
         return 0
-    except (UnionError, OSError, subprocess.SubprocessError):
-        print("source_refresh_failed_closed", file=sys.stderr)
+    except Exception as error:
+        print(diagnostic(error, _STAGE.get()), file=sys.stderr)
         return 1
 
 

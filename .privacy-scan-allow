@@ -29,3 +29,5 @@ public/historical.html section:plates phone-bare
 # All plate/phone rules remain active, as do all public output scans.
 src/parking_stats/private_builder.py raw-export-key
 tests/test_private_builder.py raw-export-key
+# Enumerated diagnostic code names only, not raw data or output carriers.
+src/parking_stats/source_refresh.py raw-export-column
