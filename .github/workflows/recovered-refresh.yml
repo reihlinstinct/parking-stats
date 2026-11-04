@@ -2,8 +2,6 @@ name: Recovered private-source refresh
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '17 * * * *'
 
 permissions:
   contents: read

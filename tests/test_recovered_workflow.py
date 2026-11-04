@@ -1,4 +1,4 @@
-"""The parked workflow cannot access private source or publish output."""
+"""The reviewed workflow builds candidates without publication or a timer."""
 
 import importlib.util
 import unittest
@@ -27,6 +27,7 @@ class RecoveredWorkflowTests(unittest.TestCase):
             "pull_request_target",
         ):
             self.assertNotIn(forbidden, workflow)
+        self.assertNotIn("schedule:", workflow)
         self.assertIn("environment: parking-source-main", workflow)
         self.assertIn("PARKING_SOURCE_READ_TOKEN", workflow)
         self.assertIn("PARKING_RECOVERED_AGE_IDENTITY", workflow)
