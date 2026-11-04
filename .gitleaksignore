@@ -8,3 +8,4 @@
 # Same existing public-only Cloudflare beacon copied into the manual/archive pages.
 4ec861f22152b89796e66d73883500be369fc1bd:public/index.html:generic-api-key:3
 4ec861f22152b89796e66d73883500be369fc1bd:public/historical.html:generic-api-key:50
+21b4612ebfbfc49b70d02fd6b565428a48654078:public/index.html:generic-api-key:3

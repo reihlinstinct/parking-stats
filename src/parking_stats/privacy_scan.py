@@ -202,8 +202,20 @@ def scan_lines(
     for lineno, line in enumerate(materialised, 1):
         skipped = skip_rules | (PLATES_SECTION_RULES if lineno in waived else set())
         normalised = normalize_line(line)
+        # Ignore only the SHA and line-number metadata of a validated Gitleaks
+        # fingerprint. Paths remain scanned; malformed lines remain unchanged.
+        fingerprint = (
+            re.fullmatch(r"[0-9a-f]{40}:([^:\s]+):generic-api-key:[1-9][0-9]*", line)
+            if relpath == ".gitleaksignore"
+            else None
+        )
         for rule, pattern in RULES.items():
-            if rule not in skipped and pattern.search(normalised):
+            candidate = (
+                fingerprint.group(1)
+                if fingerprint and rule == "plate-compact"
+                else normalised
+            )
+            if rule not in skipped and pattern.search(candidate):
                 findings.append(Finding(relpath, lineno, rule))
     return findings
 
