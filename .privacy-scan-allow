@@ -25,3 +25,6 @@ tests/test_union.py raw-export-key
 # Archived landing page with an added archive notice: preserve its existing plate section
 # and public analytics token allowances, never widen the new landing page.
 public/historical.html section:plates phone-bare
+
+# Exact commit fingerprints are scanner metadata, not vehicle identifiers.
+.gitleaksignore plate-compact

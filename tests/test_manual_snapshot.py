@@ -27,4 +27,7 @@ class ManualSnapshotTests(unittest.TestCase):
         self.assertEqual(metadata["refresh_mode"], "manual")
         self.assertIn("לא אוטומטי", page)
         self.assertIn("historical.html", page)
+        self.assertIn("חמש ההגשות עם מספר עירוני כלולות ב-1,018", page)
+        self.assertIn("שתי ההגשות שטרם שויכו כלולות ב-7", page)
+        self.assertIn("ואינן נכללות בסך המספרים", page)
         self.assertIn("לא נתונים חיים", (ROOT / "public/historical.html").read_text())
