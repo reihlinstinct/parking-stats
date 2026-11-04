@@ -118,15 +118,27 @@ class PrivateFetchTests(unittest.TestCase):
             deadlines = []
             stages = []
 
-            def fake_git(path, args, env, root, deadline, stage, capture=False):
+            def fake_git(
+                path, args, env, root, deadline, stage, capture=False, max_output=1024
+            ):
                 deadlines.append(deadline)
                 stages.append(stage)
                 self.assertEqual(deadline, 300)
                 MOD.check_budget(root, deadline, stage)
-                clock[0] += 45
+                clock[0] += 25
+                if stage == "checkout" and args[0] == "ls-tree":
+                    return (
+                        b"100644 blob " + b"b" * 40 + b"\t" + args[-1].encode() + b"\0"
+                    )
+                if stage == "checkout":
+                    return (
+                        b"folder_id,metadata_record,ref_mapping\nrow,reports/row/report.json,verified\n"
+                        if args[-1].endswith(":ledger/reports.csv")
+                        else b"{}"
+                    )
                 if stage == "revision":
                     return b"a" * 40 + b"\n"
-                if stage == "initialize":
+                if args[0] == "init":
                     (path / ".git").mkdir()
                 return b""
 
@@ -142,9 +154,8 @@ class PrivateFetchTests(unittest.TestCase):
                 with self.assertRaises(MOD.FetchError) as error:
                     MOD.main()
             self.assertEqual(error.exception.code, "timeout")
-            self.assertEqual(
-                stages, ["initialize", "fetch", "revision", "checkout"] * 2
-            )
+            self.assertEqual(len(stages), 13)
+            self.assertIn("checkout", stages)
             self.assertEqual(set(deadlines), {300})
             self.assertFalse((Path(tmp) / "parking-private").exists())
 
@@ -208,3 +219,234 @@ class PrivateFetchTests(unittest.TestCase):
                 with self.assertRaises(MOD.FetchError) as error:
                     MOD.git(root, ["checkout"], {}, root, deadline, "checkout")
             self.assertEqual(error.exception.code, "timeout")
+
+
+class NarrowFetchTests(unittest.TestCase):
+    def test_required_paths_only_exact_json_members(self):
+        self.assertEqual(
+            MOD.required_paths(
+                b"folder_id,metadata_record,ref_mapping\nrow,reports/row/report.json,verified\nprep,../../no,not_filed_prepared\nempty,,pending\n"
+            ),
+            ["reports/row/report.json"],
+        )
+        for path in (
+            "../secret",
+            "/secret",
+            "reports/other/report.json",
+            "ledger/report.json",
+            "reports/row/report.txt",
+            "reports/row/original.jpg",
+        ):
+            raw = (
+                "folder_id,metadata_record,ref_mapping\nrow," + path + ",verified\n"
+            ).encode()
+            with self.assertRaises(MOD.FetchError) as error:
+                MOD.required_paths(raw)
+            self.assertEqual(error.exception.code, "source_path")
+
+    def test_fake_fetch_never_checkout_or_photo_and_missing_path_fixed(self):
+        for missing in (False, True):
+            with tempfile.TemporaryDirectory() as tmp:
+                calls = []
+
+                def fake_git(
+                    path,
+                    args,
+                    env,
+                    root,
+                    deadline,
+                    stage,
+                    capture=False,
+                    max_output=1024,
+                ):
+                    calls.append((args, stage, deadline))
+                    if args[0] == "init":
+                        (path / ".git").mkdir()
+                    if stage == "fetch":
+                        self.assertIn("--filter=blob:none", args)
+                    if stage == "revision":
+                        return b"a" * 40 + b"\n"
+                    if stage == "checkout" and args[0] == "ls-tree":
+                        if missing and args[-1] != "ledger/reports.csv":
+                            return b""
+                        return (
+                            b"100644 blob "
+                            + b"b" * 40
+                            + b"\t"
+                            + args[-1].encode()
+                            + b"\0"
+                        )
+                    if stage == "checkout":
+                        if args[-1].endswith(":ledger/reports.csv"):
+                            return b"folder_id,metadata_record,ref_mapping\nrow,reports/row/report.json,verified\n"
+                        if missing:
+                            raise MOD.FetchError("checkout", "nonzero_exit")
+                        return b"{}"
+                    return b""
+
+                with (
+                    patch.dict(
+                        MOD.os.environ,
+                        {"RUNNER_TEMP": tmp, "PARKING_SOURCE_READ_TOKEN": "synthetic"},
+                    ),
+                    patch.object(MOD, "git", side_effect=fake_git),
+                    patch("sys.stdout"),
+                ):
+                    if missing:
+                        with self.assertRaises(MOD.FetchError) as error:
+                            MOD.main()
+                        self.assertEqual(
+                            (error.exception.stage, error.exception.code),
+                            ("checkout", "missing_path"),
+                        )
+                        self.assertFalse((Path(tmp) / "parking-private").exists())
+                    else:
+                        MOD.main()
+                        root = Path(tmp) / "parking-private"
+                        self.assertEqual(
+                            sorted(
+                                str(p.relative_to(root))
+                                for p in root.rglob("*")
+                                if p.is_file()
+                            ),
+                            [
+                                "baseline/private/recovered-cases/union.json.age",
+                                "current/ledger/reports.csv",
+                                "current/reports/row/report.json",
+                            ],
+                        )
+                for args, stage, deadline in calls:
+                    self.assertNotIn("checkout", args)
+                    self.assertFalse(
+                        any(str(a).endswith((".jpg", ".png", ".py")) for a in args)
+                    )
+                self.assertEqual(len({d for a, s, d in calls}), 1)
+
+
+class RealNarrowFetchTests(unittest.TestCase):
+    def test_real_git_materializes_only_selected_blobs(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            remote = root / "remote.git"
+            seed = root / "seed"
+            runroot = root / "run"
+            runroot.mkdir()
+
+            def command(*args, cwd=None):
+                return subprocess.run(
+                    ["git", *args], cwd=cwd, capture_output=True, check=True, text=True
+                ).stdout.strip()
+
+            command("init", "--bare", str(remote))
+            command("config", "uploadpack.allowFilter", "true", cwd=remote)
+            command("clone", str(remote), str(seed))
+            command("config", "user.email", "synthetic@example.invalid", cwd=seed)
+            command("config", "user.name", "Synthetic", cwd=seed)
+            command("checkout", "-b", "main", cwd=seed)
+            (seed / "ledger").mkdir()
+            (seed / "ledger/reports.csv").write_text(
+                "folder_id,metadata_record,ref_mapping\nrow,reports/row/report.json,verified\n"
+            )
+            (seed / "reports/row").mkdir(parents=True)
+            (seed / "reports/row/report.json").write_text("{}")
+            (seed / "reports/row/original.jpg").write_bytes(
+                b"PRIVATE-SYNTHETIC-PHOTO" * 100
+            )
+            (seed / "private/recovered-cases").mkdir(parents=True)
+            (seed / "private/recovered-cases/union.json.age").write_bytes(
+                b"synthetic-cipher"
+            )
+            command("add", ".", cwd=seed)
+            command("commit", "-m", "Synthetic fixture", cwd=seed)
+            command("push", "origin", "main", cwd=seed)
+            sha = command("rev-parse", "HEAD", cwd=seed)
+            original = MOD.git
+
+            def local_git(
+                path, args, env, root, deadline, stage, capture=False, max_output=1024
+            ):
+                args = list(args)
+                args = [
+                    str(remote)
+                    if a == "https://github.com/reihlinstinct/parking-reports.git"
+                    else a
+                    for a in args
+                ]
+                args = [
+                    sha if a == "79db451eecba2fb61aa3ee449f866cc205010b3b" else a
+                    for a in args
+                ]
+                return original(
+                    path, args, env, root, deadline, stage, capture, max_output
+                )
+
+            with (
+                patch.dict(
+                    MOD.os.environ,
+                    {
+                        "RUNNER_TEMP": str(runroot),
+                        "PARKING_SOURCE_READ_TOKEN": "synthetic",
+                    },
+                ),
+                patch.object(MOD, "git", side_effect=local_git),
+                patch("sys.stdout"),
+            ):
+                MOD.main()
+            actual = sorted(
+                str(p.relative_to(runroot / "parking-private"))
+                for p in (runroot / "parking-private").rglob("*")
+                if p.is_file()
+            )
+            self.assertEqual(
+                actual,
+                [
+                    "baseline/private/recovered-cases/union.json.age",
+                    "current/ledger/reports.csv",
+                    "current/reports/row/report.json",
+                ],
+            )
+            self.assertFalse(
+                any(p.name == ".git" for p in (runroot / "parking-private").rglob("*"))
+            )
+
+
+class MaliciousObjectTests(unittest.TestCase):
+    def test_git_tree_modes_rejected(self):
+        for mode, kind in [("120000", "blob"), ("100755", "blob"), ("040000", "tree")]:
+            with tempfile.TemporaryDirectory() as tmp:
+
+                def fake(
+                    path,
+                    args,
+                    env,
+                    root,
+                    deadline,
+                    stage,
+                    capture=False,
+                    max_output=1024,
+                ):
+                    if stage == "checkout" and args[0] != "ls-tree":
+                        raise AssertionError("unsafe blob was fetched")
+                    if args[0] == "init":
+                        (path / ".git").mkdir()
+                    if stage == "revision":
+                        return b"a" * 40 + b"\n"
+                    if stage == "checkout" and args[0] == "ls-tree":
+                        return (
+                            mode + " " + kind + " " + "b" * 40 + "\t" + args[-1] + "\0"
+                        ).encode()
+                    return b""
+
+                with (
+                    patch.dict(
+                        MOD.os.environ,
+                        {"RUNNER_TEMP": tmp, "PARKING_SOURCE_READ_TOKEN": "synthetic"},
+                    ),
+                    patch.object(MOD, "git", side_effect=fake),
+                    patch("sys.stdout"),
+                ):
+                    with self.assertRaises(MOD.FetchError) as error:
+                        MOD.main()
+                    self.assertEqual(error.exception.code, "source_path")

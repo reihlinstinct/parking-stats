@@ -1,7 +1,10 @@
 """Quiet, shallow private data fetch with a single bounded time/size budget."""
 
 import base64
+import csv
+import io
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -16,7 +19,16 @@ STAGES = frozenset(
     {"startup", "initialize", "fetch", "revision", "checkout", "cleanup"}
 )
 CODES = frozenset(
-    {"precondition", "timeout", "nonzero_exit", "size_limit", "revision", "other"}
+    {
+        "precondition",
+        "timeout",
+        "nonzero_exit",
+        "size_limit",
+        "revision",
+        "other",
+        "missing_path",
+        "source_path",
+    }
 )
 
 
@@ -48,7 +60,7 @@ def check_budget(root, deadline, stage):
                 raise FetchError(stage, "size_limit")
 
 
-def git(path, args, env, root, deadline, stage, capture=False):
+def git(path, args, env, root, deadline, stage, capture=False, max_output=1024):
     check_budget(root, deadline, stage)
     with tempfile.TemporaryFile() as output:
         process = subprocess.Popen(
@@ -61,16 +73,16 @@ def git(path, args, env, root, deadline, stage, capture=False):
         try:
             while process.poll() is None:
                 check_budget(root, deadline, stage)
-                if output.tell() > 1024:
+                if output.tell() > max_output:
                     raise FetchError(stage, "size_limit")
                 time.sleep(min(0.2, max(0, deadline - time.monotonic())))
             check_budget(root, deadline, stage)
             if process.returncode:
                 raise FetchError(stage, "nonzero_exit")
-            if output.tell() > 1024:
+            if output.tell() > max_output:
                 raise FetchError(stage, "size_limit")
             output.seek(0)
-            return output.read(1025)
+            return output.read(max_output + 1)
         finally:
             # Git can leave remote-https/index-pack descendants alive even when
             # its direct parent has exited. Terminate the dedicated whole group.
@@ -79,6 +91,40 @@ def git(path, args, env, root, deadline, stage, capture=False):
             except ProcessLookupError:
                 pass
             process.wait()
+
+
+def required_paths(raw):
+    """Mirror the builder's record boundary; untrusted CSV never selects arbitrary files."""
+    try:
+        reader = csv.DictReader(io.StringIO(raw.decode("utf-8")), strict=True)
+        if (
+            not reader.fieldnames
+            or len(reader.fieldnames) != len(set(reader.fieldnames))
+            or not {"folder_id", "metadata_record", "ref_mapping"}
+            <= set(reader.fieldnames)
+        ):
+            raise ValueError
+        paths = set()
+        for index, row in enumerate(reader):
+            if (
+                index >= 10000
+                or None in row
+                or any(value is None for value in row.values())
+            ):
+                raise ValueError
+            folder = row["folder_id"]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", folder):
+                raise ValueError
+            if row["ref_mapping"] == "not_filed_prepared":
+                continue
+            relative = row["metadata_record"]
+            if relative:
+                if relative != "reports/" + folder + "/report.json":
+                    raise ValueError
+                paths.add(relative)
+        return sorted(paths)
+    except (ValueError, UnicodeError, csv.Error, TypeError):
+        raise FetchError("checkout", "source_path") from None
 
 
 def main():
@@ -117,6 +163,15 @@ def main():
 
             run("initialize", "init", "-q")
             run(
+                "initialize",
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/reihlinstinct/parking-reports.git",
+            )
+            run("initialize", "config", "remote.origin.promisor", "true")
+            run("initialize", "config", "remote.origin.partialclonefilter", "blob:none")
+            run(
                 "fetch",
                 "-c",
                 "core.hooksPath=/dev/null",
@@ -124,7 +179,8 @@ def main():
                 "--quiet",
                 "--depth=1",
                 "--no-tags",
-                "https://github.com/reihlinstinct/parking-reports.git",
+                "--filter=blob:none",
+                "origin",
                 ref,
             )
             sha = (
@@ -135,19 +191,49 @@ def main():
             if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
                 raise FetchError("revision", "revision")
             print("::add-mask::" + sha, flush=True)
-            run(
-                "checkout",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "filter.lfs.smudge=",
-                "-c",
-                "filter.lfs.required=false",
-                "checkout",
-                "--quiet",
-                "--detach",
-                sha,
-            )
+
+            # A partial shallow fetch downloads trees/commits only. Materialize
+            # exactly ledger + validated references, never all photos or scripts.
+            def materialize(relative):
+                entry = run(
+                    "checkout", "ls-tree", "-z", sha, "--", relative, capture=True
+                )
+                if not entry:
+                    raise FetchError("checkout", "missing_path")
+                # Reject trees, executable files and symlinks before lazy blob fetch.
+                try:
+                    mode_type, name = entry.rstrip(b"\0").split(b"\t")
+                    mode, kind, object_id = mode_type.split()
+                    if (
+                        mode != b"100644"
+                        or kind != b"blob"
+                        or name.decode() != relative
+                    ):
+                        raise ValueError
+                except (ValueError, UnicodeError):
+                    raise FetchError("checkout", "source_path") from None
+                raw = git(
+                    path,
+                    ["-c", "core.hooksPath=/dev/null", "show", sha + ":" + relative],
+                    env,
+                    root,
+                    deadline,
+                    "checkout",
+                    True,
+                    20 * 1024 * 1024,
+                )
+                destination = path / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(raw)
+                check_budget(root, deadline, "checkout")
+                return raw
+
+            if folder == "current":
+                raw = materialize("ledger/reports.csv")
+                for relative in required_paths(raw):
+                    materialize(relative)
+            else:
+                materialize("private/recovered-cases/union.json.age")
             shutil.rmtree(path / ".git")
     except BaseException:
         shutil.rmtree(root, ignore_errors=True)
