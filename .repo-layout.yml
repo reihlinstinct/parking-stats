@@ -62,6 +62,11 @@
         "*.py"
       ]
     },
+    "tools": {
+      "allow": [
+        "*.py"
+      ]
+    },
     "vendor": {
       "allow": [
         "*.json"
