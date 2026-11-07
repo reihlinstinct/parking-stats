@@ -35,9 +35,8 @@ def load_contract(root: Path) -> dict:
 
 
 def tracked_files(root: Path) -> list[str]:
-    out = subprocess.run(
-        ["git", "ls-files"], cwd=root, check=True, capture_output=True, text=True
-    )
+    cmd = ["git", "ls-files"]
+    out = subprocess.run(cmd, cwd=root, check=True, capture_output=True, text=True)
     return [line for line in out.stdout.splitlines() if line]
 
 
@@ -55,12 +54,13 @@ def check(root: Path) -> list[str]:
     files = tracked_files(root)
     dirs = contract["directories"]
     root_rules = contract["root"]
+    deny_patterns = root_rules.get("deny", [])
 
     for path in files:
         parts = path.split("/")
         if len(parts) == 1:
             name = parts[0]
-            if any(fnmatch.fnmatchcase(name, pat) for pat in root_rules.get("deny", [])):
+            if any(fnmatch.fnmatchcase(name, pat) for pat in deny_patterns):
                 violations.append(f"denied at repository root: {path}")
             elif not any(fnmatch.fnmatchcase(name, pat) for pat in root_rules["allow"]):
                 violations.append(f"not allowed at repository root: {path}")
@@ -83,7 +83,8 @@ def main() -> int:
     for violation in violations:
         print(f"layout violation: {violation}")
     if violations:
-        print(f"{len(violations)} layout violation(s); see .repo-layout.yml and CONTRIBUTING.md")
+        count = len(violations)
+        print(f"{count} layout violation(s); see .repo-layout.yml and CONTRIBUTING.md")
         return 1
     print("layout OK")
     return 0
