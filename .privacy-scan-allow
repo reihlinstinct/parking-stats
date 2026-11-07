@@ -31,3 +31,7 @@ src/parking_stats/private_builder.py raw-export-key
 tests/test_private_builder.py raw-export-key
 # Enumerated diagnostic code names only, not raw data or output carriers.
 src/parking_stats/source_refresh.py raw-export-column
+# Stdlib-only layout checker: argparse uses a field literally named
+# "description"; no raw exports here, waive only that rule (same false
+# positive as pyproject.toml and the scanner itself above).
+tools/check_repo_layout.py raw-export-key
