@@ -16,7 +16,8 @@
       ".gitignore",
       ".gitleaksignore",
       ".privacy-scan-allow",
-      "LICENSE"
+      "LICENSE",
+      "deps-inventory.json"
     ],
     "deny": [
       "*.py"
