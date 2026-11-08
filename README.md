@@ -63,11 +63,6 @@ panning still shows streets (`--basemap PATH` or
 
 ### What the scanner detects
 
-- License plates: dashed/spaced forms with `- . / _`, whitespace or
-  Unicode dashes (U+2010-U+2015, U+2212) as separators, repeats allowed;
-  and compact 7-8 digit forms with optional separators (repeats allowed)
-  between the digits, so stray spaces inside the number are caught too.
-  ISO dates are excluded from the compact rule.
 - Israeli mobile numbers: `05X` / `+972` / `972` / `00972` prefixes, an
   optional `(0)` after an international prefix, and any mix of dashes,
   spaces, dots, slashes or parentheses between the digit groups; the bare
@@ -82,7 +77,6 @@ converted to plain spaces.
 
 ### Scanner limitations (accepted)
 
-Matching is per line: a plate or key split across a line break is not
-detected. The compact plate rule also matches bare 7-8 digit numbers
-(aggregate outputs never contain any, so a hit is worth a human look
-rather than a waiver).
+Matching is per line: a phone or key split across a line break is not
+detected. License plates are public data (owner decision 2026-11-08) and
+no longer scanned.

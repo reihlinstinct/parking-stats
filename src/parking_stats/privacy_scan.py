@@ -4,12 +4,6 @@ The aggregate-only rule (see README): this repository publishes counts,
 never raw data. This scanner fails CI when a tracked text file contains
 patterns that indicate private data:
 
-- Israeli license plates: dashed/spaced forms (XX-XXX-XX, XXX-XX-XXX)
-  with any of ``- . space / _`` or Unicode dashes (U+2010-U+2015,
-  U+2212) as separators, repeats allowed; and compact forms of 7-8
-  digits, each optionally separated by one such separator (covers a
-  stray space inside the number). ISO-style dates (YYYY-MM-DD and
-  friends) are excluded from the compact rule;
 - Israeli mobile numbers: 05X, +972, 972 or 00972 prefixes, an
   optional ``(0)`` after an international prefix, and any mix of
   dashes, spaces, dots, slashes or parentheses between digit groups;
@@ -33,19 +27,12 @@ rule-scoped form so other rules still guard the file. Use it for files
 that carry synthetic detection samples and for known-safe collisions
 such as package metadata fields named ``description``.
 
-The directive ``section:plates`` waives only the ``plate`` and
-``plate-compact`` rules, and only on lines strictly between one
-``<!-- repeat-plates:begin -->`` / ``<!-- repeat-plates:end -->``
-marker pair in that file. Anything else - no pair, extra markers, a
-reversed pair - waives nothing, so a broken section fails closed; the
-marker lines themselves are always scanned strictly. It exists for the
-generated landing page's repeat-plates section, the single approved
-place where plates appear.
+Known limitations, accepted by design: matching is per line, so a phone
+or key split across two lines is not detected.
 
-Known limitations, accepted by design: matching is per line, so a plate
-or key split across two lines is not detected; and the compact plate
-rule also matches bare 7-8 digit numbers (aggregate outputs never
-contain any, so a hit here is worth a human look either way).
+License plates are public data (owner decision 2026-11-08) and no longer
+scanned; the former ``plate``/``plate-compact`` rules and the
+``section:plates`` directive were removed.
 """
 
 from __future__ import annotations
@@ -59,11 +46,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-# Separator characters accepted inside plates and phones: ASCII dash,
-# dot, whitespace, slash, underscore, and Unicode dashes (raw string so
-# the \u escapes reach the regex engine verbatim).
-_SEP = r"-.\s/_\u2010-\u2015\u2212"
-# Phones additionally tolerate parentheses: "+972 (0)54-..." forms.
+# Separator characters accepted inside phones: ASCII dash, dot,
+# whitespace, slash, underscore, and Unicode dashes (raw string so the
+# \u escapes reach the regex engine verbatim); parentheses additionally
+# tolerated: "+972 (0)54-..." forms.
 _PHONE_SEP = r"-.\s()/\u2010-\u2015\u2212"
 
 _ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‎‏⁠﻿"), None)
@@ -76,21 +62,6 @@ def normalize_line(line: str) -> str:
 
 
 RULES: dict[str, re.Pattern[str]] = {
-    # Dashed/spaced Israeli plates, e.g. XX-XXX-XX, XXX-XX-XXX, with any
-    # separator from _SEP, repeats allowed.
-    "plate": re.compile(
-        rf"\b\d{{2}}[{_SEP}]+\d{{3}}[{_SEP}]+\d{{2}}\b"
-        rf"|\b\d{{3}}[{_SEP}]+\d{{2}}[{_SEP}]+\d{{3}}\b"
-    ),
-    # Compact Israeli plates: 7-8 digits with optional separators between
-    # digits, repeats allowed (covers bare runs and stray-separator forms).
-    # forms). ISO-style dates (2026-11-01) are excluded by the lookahead.
-    # Bare 7-8 digit counts are accepted false positives (aggregates never
-    # hold numbers that size).
-    "plate-compact": re.compile(
-        rf"(?<!\d)(?!\d{{4}}[{_SEP}]\d{{2}}[{_SEP}]\d{{2}}(?!\d))"
-        rf"(?:\d[{_SEP}]*){{6,7}}\d(?!\d)"
-    ),
     # Israeli mobiles: 05X, +972, 972 or 00972 prefixes, optional (0)
     # after the prefix, any dash/space/dot/slash/paren grouping; the bare
     # 9-digit prefixless form is the phone-bare rule below. Bare 9-digit
@@ -119,14 +90,6 @@ RULES: dict[str, re.Pattern[str]] = {
 ALLOW_FILE = ".privacy-scan-allow"
 TEXT_CHUNK = 1 << 20
 
-# Marker pair delimiting the repeat-plates section of the generated
-# landing page; the section:plates directive waives plate rules there.
-PLATES_SECTION_BEGIN = "<!-- repeat-plates:begin -->"
-PLATES_SECTION_END = "<!-- repeat-plates:end -->"
-PLATES_SECTION_RULES = frozenset({"plate", "plate-compact"})
-SECTION_DIRECTIVE = "section:plates"
-
-
 @dataclass(frozen=True)
 class Finding:
     """One rule hit; the matched text itself is never stored or printed."""
@@ -151,7 +114,7 @@ def load_allowlist(root: Path) -> dict[str, set[str]]:
             continue
         parts = line.split()
         path, rules = parts[0], set(parts[1:])
-        unknown = rules - set(RULES) - {SECTION_DIRECTIVE}
+        unknown = rules - set(RULES)
         if unknown:
             raise ValueError(
                 f"{ALLOW_FILE}: unknown rule(s) for {path}: {sorted(unknown)}"
@@ -175,54 +138,22 @@ def is_text(data: bytes) -> bool:
     return b"\x00" not in data[:TEXT_CHUNK]
 
 
-def plates_section_lines(lines: list[str]) -> set[int]:
-    """1-based line numbers strictly between one balanced marker pair.
-
-    Exactly one begin and one end, begin before end, waive the lines
-    between them (marker lines stay strict). Anything else waives
-    nothing (fail closed).
-    """
-    begins = [n for n, line in enumerate(lines, 1) if PLATES_SECTION_BEGIN in line]
-    ends = [n for n, line in enumerate(lines, 1) if PLATES_SECTION_END in line]
-    if len(begins) != 1 or len(ends) != 1 or begins[0] >= ends[0]:
-        return set()
-    return set(range(begins[0] + 1, ends[0]))
-
-
 def scan_lines(
     relpath: str,
     lines: Iterable[str],
     skip_rules: set[str],
-    allow_plates_section: bool = False,
 ) -> list[Finding]:
     """Scan normalised text lines; used for files and generated content."""
-    materialised = list(lines)
-    waived = plates_section_lines(materialised) if allow_plates_section else set()
     findings = []
-    for lineno, line in enumerate(materialised, 1):
-        skipped = skip_rules | (PLATES_SECTION_RULES if lineno in waived else set())
+    for lineno, line in enumerate(lines, 1):
         normalised = normalize_line(line)
-        # Ignore only the SHA and line-number metadata of a validated Gitleaks
-        # fingerprint. Paths remain scanned; malformed lines remain unchanged.
-        fingerprint = (
-            re.fullmatch(r"[0-9a-f]{40}:([^:\s]+):generic-api-key:[1-9][0-9]*", line)
-            if relpath == ".gitleaksignore"
-            else None
-        )
         for rule, pattern in RULES.items():
-            candidate = (
-                normalize_line(fingerprint.group(1))
-                if fingerprint and rule == "plate-compact"
-                else normalised
-            )
-            if rule not in skipped and pattern.search(candidate):
+            if rule not in skip_rules and pattern.search(normalised):
                 findings.append(Finding(relpath, lineno, rule))
     return findings
 
 
-def scan_file(
-    root: Path, relpath: str, skip_rules: set[str], allow_plates_section: bool = False
-) -> list[Finding]:
+def scan_file(root: Path, relpath: str, skip_rules: set[str]) -> list[Finding]:
     try:
         data = (root / relpath).read_bytes()
     except OSError:
@@ -230,10 +161,7 @@ def scan_file(
     if not is_text(data):
         return []
     return scan_lines(
-        relpath,
-        data.decode("utf-8", errors="replace").splitlines(),
-        skip_rules,
-        allow_plates_section,
+        relpath, data.decode("utf-8", errors="replace").splitlines(), skip_rules
     )
 
 
@@ -246,21 +174,14 @@ def scan(root: Path) -> list[Finding]:
         if relpath in allow and not allow[relpath]:
             continue
         granted = allow.get(relpath, set())
-        findings.extend(
-            scan_file(
-                root,
-                relpath,
-                granted & set(RULES),
-                SECTION_DIRECTIVE in granted,
-            )
-        )
+        findings.extend(scan_file(root, relpath, granted & set(RULES)))
     return findings
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="parking-stats-privacy-scan",
-        description="Fail when tracked files contain plates, phone numbers "
+        description="Fail when tracked files contain phone numbers "
         "or raw-export keys (aggregate-only rule).",
     )
     parser.add_argument("root", type=Path, nargs="?", default=Path("."))

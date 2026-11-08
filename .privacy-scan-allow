@@ -1,32 +1,30 @@
 # Synthetic detection samples live in the scanner's tests; only the
-# raw-export-key rule is waived there, plates/phones still apply.
+# raw-export-key rule is waived there, phones still apply.
 tests/test_privacy_scan.py raw-export-key
 # Package metadata and argparse both use a field literally named
 # "description"; these files contain no raw exports, waive only that rule.
 pyproject.toml raw-export-key
 src/parking_stats/privacy_scan.py raw-export-key
 src/parking_stats/publish.py raw-export-key
-# Generated repeat-plates aggregate: the one approved plate carrier.
-# Only the plate rules are waived; phones and raw-export keys still apply.
-public/data/plates.csv plate plate-compact
-# Generated landing page: plate rules are waived only between balanced
-# repeat-plates markers; the rest of the page stays fully scanned.
+# plates.csv is an ordinary public aggregate (plates are public data
+# since 2026-11-08) and needs no waiver.
+# Generated landing page: fully scanned.
 # Cloudflare Web Analytics beacon token: a public, non-secret site
 # identifier shipped to every visitor (like a GA measurement ID). The hex
 # string trips the phone-bare pattern; all other rules still apply.
-public/index.html section:plates phone-bare
+public/index.html phone-bare
 public/heatmap.html phone-bare
 public/report.html phone-bare
 # Offline reducer schema declarations and synthetic reducer tests only.
-# No raw cases are stored here; plates/phones remain fully enforced.
+# No raw cases are stored here; phones remain fully enforced.
 src/parking_stats/union.py raw-export-key raw-export-column
 tests/test_union.py raw-export-key
 
-# Archived landing page with an added archive notice: preserve its existing plate section
-# and public analytics token allowances, never widen the new landing page.
-public/historical.html section:plates phone-bare
+# Archived landing page with an added archive notice: preserve its
+# public analytics token allowance, never widen the new landing page.
+public/historical.html phone-bare
 # Offline adapter schema declarations and synthetic adapter fixtures only.
-# All plate/phone rules remain active, as do all public output scans.
+# Phone rules remain active, as do all public output scans.
 src/parking_stats/private_builder.py raw-export-key
 tests/test_private_builder.py raw-export-key
 # Enumerated diagnostic code names only, not raw data or output carriers.
