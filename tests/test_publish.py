@@ -87,21 +87,19 @@ class PublishTest(unittest.TestCase):
             self.assertEqual(publish(make_input(files), public, "x"), 1)
             self.assertFalse(public.exists())
 
-    def test_label_with_plate_is_refused(self):
+    def test_label_with_plate_is_allowed(self):
+        # Plates are public data (owner decision 2026-11-08).
         with tempfile.TemporaryDirectory() as tmp:
             public = Path(tmp) / "public"
             code = publish(make_input(FILES), public, f"רכב {PLATE}")
-            self.assertEqual(code, 1)
-            self.assertFalse(public.exists())
+            self.assertEqual(code, 0)
 
-    def test_plate_in_any_input_aborts_with_nothing_copied(self):
+    def test_plate_in_any_input_is_allowed(self):
         files = dict(FILES)
         files["streets.csv"] = f"street,reports\nרחוב {PLATE},3\n"
         with tempfile.TemporaryDirectory() as tmp:
             public = Path(tmp) / "public"
-            self.assertEqual(publish(make_input(files), public, "x"), 1)
-            self.assertFalse((public / "data").exists())
-            self.assertFalse((public / "index.html").exists())
+            self.assertEqual(publish(make_input(files), public, "x"), 0)
 
 
 if __name__ == "__main__":
@@ -212,10 +210,10 @@ class PublishPlatesTest(unittest.TestCase):
         public = Path(tempfile.mkdtemp()) / "public"
         self.assertEqual(publish(input_dir, public, "בדיקה"), 1)
 
-    def test_publish_refuses_plate_in_label_even_with_section(self):
+    def test_publish_allows_plate_in_label_with_section(self):
         input_dir = make_input({**FILES, "plates.csv": PLATES_CSV})
         public = Path(tempfile.mkdtemp()) / "public"
-        self.assertEqual(publish(input_dir, public, "תווית " + PLATE), 1)
+        self.assertEqual(publish(input_dir, public, "תווית " + PLATE), 0)
 
     def test_publish_refuses_count_below_repeat_threshold(self):
         low = "plate,reports\n" + PLATE8 + ",2\n"

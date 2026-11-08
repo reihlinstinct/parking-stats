@@ -23,7 +23,7 @@ from pathlib import Path
 from . import heatmap as heatmap_mod
 from .analytics import add_analytics
 from .charts import hbar_chart, vbar_chart
-from .privacy_scan import PLATES_SECTION_RULES, scan_lines
+from .privacy_scan import scan_lines
 
 EXPECTED_COLUMNS: dict[str, tuple[str, ...]] = {
     "monthly.csv": ("month", "reports"),
@@ -198,7 +198,7 @@ def _card(number: str, caption: str) -> str:
 
 def _plates_section(plates: list[tuple[str, int]]) -> str:
     """Repeat-plates block: plate + report count only, inside the markers
-    the privacy scanner's section:plates directive recognises."""
+    Kept as inert HTML comments after the plate rules were retired."""
     if not plates:
         return ""
     rows = "".join(
@@ -309,10 +309,7 @@ def scan_output(input_dir: Path) -> list[str]:
         # plates.csv is the one approved plate carrier: plate rules are
         # waived, every other rule still guards it.
         findings.extend(
-            str(f)
-            for f in scan_lines(
-                "plates.csv", text.splitlines(), set(PLATES_SECTION_RULES)
-            )
+            str(f) for f in scan_lines("plates.csv", text.splitlines(), set())
         )
     findings.extend(check_shape(input_dir))
     return findings
@@ -437,10 +434,7 @@ def publish(
         print(f"publish: refused: index build failed: {exc}", file=sys.stderr)
         return 1
     index_findings = [
-        str(f)
-        for f in scan_lines(
-            "index.html", index_text.splitlines(), set(), allow_plates_section=True
-        )
+        str(f) for f in scan_lines("index.html", index_text.splitlines(), set())
     ]
     if index_findings:
         for finding in index_findings:
