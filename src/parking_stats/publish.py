@@ -309,10 +309,7 @@ def scan_output(input_dir: Path) -> list[str]:
         # plates.csv is the one approved plate carrier: plate rules are
         # waived, every other rule still guards it.
         findings.extend(
-            str(f)
-            for f in scan_lines(
-                "plates.csv", text.splitlines(), set()
-            )
+            str(f) for f in scan_lines("plates.csv", text.splitlines(), set())
         )
     findings.extend(check_shape(input_dir))
     return findings
@@ -437,10 +434,7 @@ def publish(
         print(f"publish: refused: index build failed: {exc}", file=sys.stderr)
         return 1
     index_findings = [
-        str(f)
-        for f in scan_lines(
-            "index.html", index_text.splitlines(), set()
-        )
+        str(f) for f in scan_lines("index.html", index_text.splitlines(), set())
     ]
     if index_findings:
         for finding in index_findings:

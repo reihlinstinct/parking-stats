@@ -15,7 +15,6 @@ from pathlib import Path
 
 from parking_stats.privacy_scan import (
     RULES,
-    load_allowlist,
     main,
     normalize_line,
     scan,
@@ -144,8 +143,6 @@ class ScanTest(unittest.TestCase):
         (root / "blob.bin").write_bytes(b"\x00\x01" + PHONE.encode())
         subprocess.run(["git", "add", "-A"], cwd=root, check=True)
         self.assertEqual(scan(root), [])
-
-
 
 
 if __name__ == "__main__":

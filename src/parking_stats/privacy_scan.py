@@ -90,6 +90,7 @@ RULES: dict[str, re.Pattern[str]] = {
 ALLOW_FILE = ".privacy-scan-allow"
 TEXT_CHUNK = 1 << 20
 
+
 @dataclass(frozen=True)
 class Finding:
     """One rule hit; the matched text itself is never stored or printed."""
