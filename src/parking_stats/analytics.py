@@ -9,6 +9,8 @@ not flag a long hex run; it is not a secret.
 Cloudflare Web Analytics uses no cookies and stores no IP addresses.
 """
 
+from .i18n import t
+
 # A list ruff format will not collapse into one literal; no part carries a
 # 7+ digit run, so the phone-bare and plate-compact rules stay quiet.
 _TOKEN = "".join(
@@ -26,30 +28,38 @@ BEACON = (
     'data-cf-beacon=\'{"token": "' + _TOKEN + "\"}'></script>"
 )
 
-PRIVACY_LINE = (
-    '<p style="text-align:center;color:#5a6b85;font-size:.85rem">'
-    "פרטיות: ספירת ביקורים אנונימית (Cloudflare Web Analytics) בלבד - "
-    "ללא עוגיות וללא שמירת כתובות IP.</p>"
-)
+
+def privacy_line(lang: str | None = None) -> str:
+    """The visible disclosure under every page, in the page's language."""
+    return (
+        '<p style="text-align:center;color:#5a6b85;font-size:.85rem">'
+        f"{t('analytics.privacy', lang)}</p>"
+    )
+
+
+# The default language's line, kept for callers of the old constant.
+PRIVACY_LINE = privacy_line()
 
 # The heat map's CSP must allow the beacon origin or the browser blocks it.
 CSP_SCRIPT_SRC = "script-src 'self' https://static.cloudflareinsights.com"
 CSP_CONNECT_SRC = "connect-src https://cloudflareinsights.com"
 
 
-def add_analytics(html: str) -> str:
+def add_analytics(html: str, lang: str | None = None) -> str:
     """Insert the beacon before </head> and the privacy line before </body>.
 
     Idempotent: a page that already carries the beacon is returned
     unchanged, so republishing an already-instrumented report is safe.
+    The disclosure is in ``lang`` (the default language when None).
     """
+    line = privacy_line(lang)
     if "cloudflareinsights.com/beacon" in html:
         return html
     if "</head>" in html:
         html = html.replace("</head>", BEACON + "</head>", 1)
         if "</body>" in html:
-            html = html.replace("</body>", PRIVACY_LINE + "</body>", 1)
+            html = html.replace("</body>", line + "</body>", 1)
     elif "</body>" in html:
         # No <head>: the beacon is valid in the body too.
-        html = html.replace("</body>", BEACON + PRIVACY_LINE + "</body>", 1)
+        html = html.replace("</body>", BEACON + line + "</body>", 1)
     return html

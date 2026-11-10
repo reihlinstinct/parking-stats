@@ -60,6 +60,27 @@ and inlined into the map SVG at publish time with a wide margin so
 panning still shows streets (`--basemap PATH` or
 `PARKING_STATS_BASEMAP`).
 
+### Languages
+
+Every visible word of the generated pages (landing page, heat map, chart
+labels, the visit-counter disclosure) comes from one catalog,
+`src/parking_stats/catalog.py`. Each language is one block there (code,
+its own name, direction, whether it is a machine draft, plural rule), and
+the publisher writes one page set per block: the default language keeps
+`index.html` and `heatmap.html`, every other language gets
+`index.<code>.html` and `heatmap.<code>.html` next to them, so the data
+links stay the same. Each page carries a language picker built from the
+catalog, showing every language by its own name.
+
+Adding a language is one new block plus one value per key; the tests in
+`tests/test_i18n.py` fail until every key has it, and a source scan fails
+if a language code appears anywhere else. Non-source languages are machine
+drafts until a native speaker reviews them, and their pages say so.
+
+Data is never translated: street, category and neighbourhood names,
+plates, the CSV/JSON files and the upstream `report.html` stay as
+published.
+
 ### What the scanner detects
 
 - Israeli mobile numbers: `05X` / `+972` / `972` / `00972` prefixes, an

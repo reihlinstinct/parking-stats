@@ -29,6 +29,9 @@ from pathlib import Path
 from typing import TypedDict
 from xml.sax.saxutils import escape
 
+from . import i18n
+from .i18n import t, tn
+
 MIN_STREET_REPORTS = 4
 COORD_DECIMALS = 3
 
@@ -300,6 +303,7 @@ def _render_cells(
     project: Callable[[float, float], tuple[float, float]],
     scale: float = 1.0,
     view: tuple[float, float, float, float] | None = None,
+    lang: str | None = None,
 ) -> tuple[list[str], list[str], list[_Box]]:
     """Emit heat blobs, overlay (dots + labels) and collision boxes.
 
@@ -326,7 +330,10 @@ def _render_cells(
         )
         radius = _radius(cell, max_n)
         gx, gy = project(cell["lat"], cell["lng"])
-        title = escape(f"{cell['label']}: {cell['n']} דיווחים", {'"': "&quot;"})
+        title = escape(
+            tn("heatmap.cell_title", cell["n"], lang, label=cell["label"]),
+            {'"': "&quot;"},
+        )
         blobs.append(
             f'<circle cx="{gx:.2f}" cy="{gy:.2f}" r="{radius}" '
             f'fill="url(#g{bucket})" filter="url(#soft)">'
@@ -449,7 +456,9 @@ def _initial_view(
     return (x, y, w, h), outside
 
 
-def _map_svg(cells: list[Cell], basemap_path: str) -> tuple[str, int]:
+def _map_svg(
+    cells: list[Cell], basemap_path: str, lang: str | None = None
+) -> tuple[str, int]:
     """The interactive map SVG; returns (markup, outside-view count)."""
     project, _bbox = _projection(cells)
     (vx, vy, vw, vh), outside = _initial_view(cells, project)
@@ -473,7 +482,7 @@ def _map_svg(cells: list[Cell], basemap_path: str) -> tuple[str, int]:
     parts = [
         f'<svg id="map" viewBox="{view}"'
         f' width="960" height="{960 * vh / vw:.0f}"'
-        ' role="img" aria-label="מפת מוקדים חמים ברמת רחוב"'
+        f' role="img" aria-label="{t("heatmap.map_aria", lang)}"'
         f' data-home="{view}"'
         f' data-world="0,0,{_GRID_W:.0f},{_GRID_H:.0f}"'
         f' data-min-span="{MAX_ZOOM_MIN_SPAN:.0f}">',
@@ -484,7 +493,7 @@ def _map_svg(cells: list[Cell], basemap_path: str) -> tuple[str, int]:
     # readable size in the cropped view and grows/shrinks with zoom;
     # the dots, which represent geography, keep their grid size.
     blobs, overlay, _placed = _render_cells(
-        cells, project, scale=vw / _GRID_W, view=(vx, vy, vw, vh)
+        cells, project, scale=vw / _GRID_W, view=(vx, vy, vw, vh), lang=lang
     )
     parts.extend(blobs)
     if basemap_path:
@@ -501,19 +510,9 @@ def _map_svg(cells: list[Cell], basemap_path: str) -> tuple[str, int]:
     return "".join(parts), outside
 
 
-def _streets_note(count: int, singular: str, plural: str | None = None) -> str:
-    """Hebrew note line with singular/plural grammar."""
-    if count == 1:
-        return f"<p>רחוב נוסף אחד {singular}.</p>"
-    return f"<p>{count} רחובות נוספים {plural or singular}.</p>"
-
-
-def _outside_note(outside: int) -> str:
-    """Note that cells outside the initial view are not dropped (#28)."""
-    hint = "מופיעים בטבלה, ואפשר לראותם על המפה בעזרת הזזה או הקטנה"
-    if outside == 1:
-        return f"<p>מוקד נוסף אחד מחוץ לתצוגה הראשונית - {hint}.</p>"
-    return f"<p>{outside} מוקדים נוספים מחוץ לתצוגה הראשונית - {hint}.</p>"
+def _note(key: str, count: int, lang: str | None = None) -> str:
+    """A counted note line (singular/plural from the catalog)."""
+    return f"<p>{tn(key, count, lang)}</p>"
 
 
 MAP_JS = """"use strict";
@@ -629,56 +628,66 @@ def build_heatmap_html(
     below: int,
     updated: str,
     basemap_lines: list[list[tuple[float, float]]] | None = None,
+    lang: str | None = None,
 ) -> str:
+    """The heat map page in catalog language ``lang`` (default when None).
+
+    Street names are city data and stay as published in every language.
+    """
+    block = i18n.language(lang)
+    code = block["code"]
+    rtl = block["dir"] == "rtl"
     rows = "".join(
         f"<tr><td>{i}</td><td>{escape(c['label'])}</td><td>{c['n']}</td></tr>"
         for i, c in enumerate(cells, 1)
     )
     table = (
-        "<table><thead><tr><th>#</th><th>רחוב</th><th>דיווחים</th></tr></thead>"
+        f"<table><thead><tr><th>#</th><th>{t('heatmap.col.street', code)}</th>"
+        f"<th>{t('heatmap.col.reports', code)}</th></tr></thead>"
         f"<tbody>{rows}</tbody></table>"
         if cells
         else ""
     )
     notes = ""
     if below:
-        notes += _streets_note(
-            below, "מתחת לסף ולכן אינו מוצג", "מתחת לסף ולכן אינם מוצגים"
-        )
+        notes += _note("heatmap.note.below", below, code)
     if unmapped:
-        notes += _streets_note(unmapped, "מעל הסף ללא מיפוי")
+        notes += _note("heatmap.note.unmapped", unmapped, code)
     basemap_path = build_basemap_path(basemap_lines, cells) if basemap_lines else ""
     if cells:
-        svg, outside = _map_svg(cells, basemap_path)
+        svg, outside = _map_svg(cells, basemap_path, code)
         if outside:
-            notes = _outside_note(outside) + notes
-        # RTL legend: the scale runs right-to-left for a Hebrew reader -
-        # lowest on the right, highest on the left - and the label order
-        # matches ("max - min").
+            notes = _note("heatmap.note.outside", outside, code) + notes
+        # The swatches run lowest to highest in reading order: for an RTL
+        # page lowest on the right, highest on the left, and the label
+        # order matches ("max - min"); an LTR page reads "min - max".
         min_n = min(c["n"] for c in cells)
         max_n = max(c["n"] for c in cells)
+        span = f"{max_n} - {min_n}" if rtl else f"{min_n} - {max_n}"
         swatches = "".join(
             f'<span class="sw" style="background:{colour}"></span>'
             for colour in _HEAT_RAMP
         )
         legend = (
-            '<div class="legend" aria-label="מקרא צבעים">'
-            '<span class="legend-range">דיווחים: '
-            f'<span dir="ltr">{max_n} - {min_n}</span></span>'
+            f'<div class="legend" aria-label="{t("heatmap.legend_aria", code)}">'
+            f'<span class="legend-range">{t("heatmap.legend_label", code)} '
+            f'<span dir="ltr">{span}</span></span>'
             f"{swatches}</div>"
         )
         map_block = (
             '<div class="mapwrap">'
             '<div class="controls" id="map-controls" hidden>'
-            '<button type="button" data-zoom="in" title="הגדלה">+</button>'
-            '<button type="button" data-zoom="out" title="הקטנה">&minus;</button>'
-            '<button type="button" data-reset title="חזרה לתצוגה הראשונית">'
-            "איפוס</button></div>"
+            f'<button type="button" data-zoom="in" title="'
+            f'{t("heatmap.zoom_in", code)}">+</button>'
+            f'<button type="button" data-zoom="out" title="'
+            f'{t("heatmap.zoom_out", code)}">&minus;</button>'
+            f'<button type="button" data-reset title="'
+            f'{t("heatmap.reset_title", code)}">'
+            f"{t('heatmap.reset', code)}</button></div>"
             + svg
             + "</div>"
             + legend
-            + "<noscript><p>ללא JavaScript מוצגת תצוגה סטטית של האזור החם; "
-            "כל המוקדים מופיעים בטבלה.</p></noscript>"
+            + f"<noscript><p>{t('heatmap.noscript', code)}</p></noscript>"
             '<script src="data/map.js" defer></script>'
         )
     else:
@@ -687,21 +696,22 @@ def build_heatmap_html(
     # The ODbL attribution anchor is a plain hyperlink: it costs no
     # request until clicked and stays within default-src 'none'.
     attribution = (
-        " &middot; מפת הרקע: &copy; "
+        f" &middot; {t('heatmap.basemap_credit', code)} &copy; "
         '<a href="https://www.openstreetmap.org/copyright">'
         "OpenStreetMap contributors</a> (ODbL)"
         if basemap_path
         else ""
     )
+    footer = t("heatmap.footer", code, updated=escape(updated))
     return f"""<!DOCTYPE html>
-<html lang="he" dir="rtl">
+<html {i18n.html_attrs(code)}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy"
  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' https://static.cloudflareinsights.com; connect-src https://cloudflareinsights.com">
-<title>מפת חום - דיווחי 106 ירושלים</title>
-<style>
+<title>{t("heatmap.title", code)}</title>
+{i18n.alternate_links("heatmap")}<style>
 body {{ font-family: system-ui, sans-serif; margin: 0; color: #222; }}
 header {{ padding: 1rem 1.5rem; }}
 h1 {{ font-size: 1.4rem; margin: 0 0 .4rem; }}
@@ -721,24 +731,23 @@ main {{ padding: 0 1.5rem; }}
 .legend .legend-range {{ margin-inline-end: .5rem; }}
 .legend .sw {{ display: inline-block; width: 1.6rem; height: .8rem; }}
 table {{ border-collapse: collapse; margin: 1rem 0; }}
-th, td {{ border: 1px solid #ccc; padding: .3rem .8rem; text-align: right; }}
+th, td {{ border: 1px solid #ccc; padding: .3rem .8rem; text-align: start; }}
 footer {{ padding: .6rem 1.5rem; color: #555; font-size: .85rem; }}
-</style>
+{i18n.PICKER_CSS}</style>
 </head>
 <body>
 <header>
-<h1>מפת חום - מוקדי דיווחים ברמת רחוב</h1>
-<p>רחובות עם {MIN_STREET_REPORTS} דיווחים ומעלה בלבד, ברזולוציה מעוגנת
-של כ-111 מטר. ספירות בלבד - ללא נתונים גולמיים, לוחיות רישוי או שמות.
-הדף אינו טוען סקריפטים של צד שלישי מלבד מונה ביקורים אנונימי (Cloudflare Web Analytics) - ללא עוגיות וללא שמירת כתובות IP.</p>
-<p><a href="index.html">חזרה לדף הראשי</a></p>
+<h1>{t("heatmap.h1", code)}</h1>
+<p>{t("heatmap.intro", code, min=MIN_STREET_REPORTS)}</p>
+{i18n.draft_notice(code)}<p><a href="{i18n.page_name("index", code)}">{t("heatmap.back", code)}</a></p>
+{i18n.picker("heatmap", code)}
 </header>
 <main>
 {map_block}
 {table}
 {notes}
 </main>
-<footer>נתונים מצטברים בלבד &middot; עודכן: {escape(updated)}{attribution}</footer>
+<footer>{footer}{attribution}</footer>
 </body>
 </html>
 """
