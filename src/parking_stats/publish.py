@@ -21,8 +21,10 @@ import sys
 from pathlib import Path
 
 from . import heatmap as heatmap_mod
+from . import i18n
 from .analytics import add_analytics
 from .charts import hbar_chart, vbar_chart
+from .i18n import t, tn
 from .privacy_scan import scan_lines
 
 EXPECTED_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -104,45 +106,46 @@ ul.links a {
 }
 ul.links a:focus-visible, ul.links a:hover { background: #dbeafe; }
 table { border-collapse: collapse; margin: .2rem 0 .4rem; }
-th, td { padding: .35rem .8rem; border-bottom: 1px solid #e2e8f0; text-align: right; }
+th, td { padding: .35rem .8rem; border-bottom: 1px solid #e2e8f0; text-align: start; }
 th { color: #1e3a8a; font-size: .9rem; }
 footer { text-align: center; color: #475569; font-size: .85rem; padding: 0 1rem 2rem; }
 """
+CSS += i18n.PICKER_CSS
 
+# Every visible word comes from the catalog (catalog.py) in the page's
+# language; the data values (categories, streets, plates) stay as published.
 PAGE = """<!DOCTYPE html>
-<html lang="he" dir="rtl">
+<html {html_attrs}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>דיווחי 106 - ירושלים</title>
-<style>{css}</style>
+<title>{title}</title>
+{alternates}<style>{css}</style>
 </head>
 <body>
 <header>
-<h1>דיווחי 106 - ירושלים</h1>
-<p>כל הנתונים כאן מצטברים בלבד: ספירות לפי חודש, שבוע, קטגוריה, רחוב
-ושכונה - ללא נתונים גולמיים או שמות. לוחיות רישוי מוצגות רק לרכבים
-שדווחו שלוש פעמים ומעלה, יחד עם מספר הדיווחים בלבד.</p>
-</header>
+<h1>{title}</h1>
+<p>{intro}</p>
+{draft_notice}{picker}</header>
 <main>
 <div class="cards">{cards}</div>
-<section><h2>דיווחים לפי חודש (12 האחרונים)</h2>{monthly_chart}</section>
-<section><h2>קטגוריות מובילות</h2>{categories_chart}</section>
-<section><h2>רחובות מובילים</h2>{streets_chart}</section>
+<section><h2>{h_monthly}</h2>{monthly_chart}</section>
+<section><h2>{h_categories}</h2>{categories_chart}</section>
+<section><h2>{h_streets}</h2>{streets_chart}</section>
 {plates_section}
-<section><h2>הדוח המלא והנתונים</h2>
+<section><h2>{h_links}</h2>
 <ul class="links">
-<li><a href="report.html">הדוח המלא עם כל הגרפים</a></li>
-<li><a href="data/summary.json">summary.json</a> (סיכום מכונה-קריא)</li>
-<li><a href="data/monthly.csv">טבלה חודשית</a></li>
-<li><a href="data/categories.csv">קטגוריות</a></li>
-<li><a href="data/streets.csv">רחובות</a></li>
+<li><a href="report.html">{l_report}</a></li>
+<li><a href="data/summary.json">summary.json</a> {l_summary_note}</li>
+<li><a href="data/monthly.csv">{l_monthly}</a></li>
+<li><a href="data/categories.csv">{l_categories}</a></li>
+<li><a href="data/streets.csv">{l_streets}</a></li>
 {plates_link}
 {heatmap_link}
 </ul>
 </section>
 </main>
-<footer>מקור הנתונים: {label} &middot; עודכן: {updated} &middot; נתונים מצטברים בלבד</footer>
+<footer>{footer}</footer>
 </body>
 </html>
 """
@@ -154,37 +157,24 @@ def _read_counts(path: Path) -> list[tuple[str, int]]:
     return [(name, int(count)) for name, count in rows[1:] if len(rows) > 1]
 
 
-def _median_text(days: float) -> str:
+def _median_text(days: float, lang: str | None = None) -> str:
     minutes = round(days * 24 * 60)
     if minutes < 60:
-        return f"כ-{minutes} דקות"
+        return tn("duration.minutes", minutes, lang)
     hours = round(minutes / 60)
     if hours < 48:
-        return f"כ-{hours} שעות"
-    return f"כ-{round(days)} ימים"
+        return tn("duration.hours", hours, lang)
+    return tn("duration.days", round(days), lang)
 
 
-MONTHS_HE = (
-    "ינואר",
-    "פברואר",
-    "מרץ",
-    "אפריל",
-    "מאי",
-    "יוני",
-    "יולי",
-    "אוגוסט",
-    "ספטמבר",
-    "אוקטובר",
-    "נובמבר",
-    "דצמבר",
-)
+MONTH_KEYS = tuple(f"month.{number:02d}" for number in range(1, 13))
 
 
-def _month_year(iso_date: str) -> str:
+def _month_year(iso_date: str, lang: str | None = None) -> str:
     """'2021-02-24' -> 'פברואר 2021' (also keeps digit chains out of the page)."""
     try:
         year, month, _ = iso_date.split("-", 2)
-        return f"{MONTHS_HE[int(month) - 1]} {year}"
+        return f"{t(MONTH_KEYS[int(month) - 1], lang)} {year}"
     except (ValueError, IndexError):
         return iso_date
 
@@ -196,22 +186,22 @@ def _card(number: str, caption: str) -> str:
     )
 
 
-def _plates_section(plates: list[tuple[str, int]]) -> str:
+def _plates_section(plates: list[tuple[str, int]], lang: str | None = None) -> str:
     """Repeat-plates block: plate + report count only, inside the markers
     Kept as inert HTML comments after the plate rules were retired."""
     if not plates:
         return ""
     rows = "".join(
         '<tr><td dir="ltr">' + html.escape(plate) + "</td><td>"
-        f"{count} דיווחים</td></tr>"
+        f"{tn('plates.count', count, lang)}</td></tr>"
         for plate, count in plates
     )
     return (
-        "<section><h2>רכבים חוזרים</h2>\n"
-        "<p>רכבים שדווחו שלוש פעמים ומעלה; מוצגים מספר הרישוי ומספר "
-        "הדיווחים בלבד.</p>\n"
+        f"<section><h2>{t('plates.title', lang)}</h2>\n"
+        f"<p>{t('plates.intro', lang)}</p>\n"
         + "<!-- repeat-plates:begin -->\n"
-        + "<table><thead><tr><th>מספר רישוי</th><th>דיווחים</th></tr></thead>"
+        + f"<table><thead><tr><th>{t('plates.col.plate', lang)}</th>"
+        + f"<th>{t('plates.col.reports', lang)}</th></tr></thead>"
         + "<tbody>"
         + rows
         + "</tbody></table>\n"
@@ -242,9 +232,21 @@ def _read_plates(input_dir: Path) -> list[tuple[str, int]]:
 
 
 def build_index(
-    input_dir: Path, label: str, updated: str, *, heatmap_available: bool = False
+    input_dir: Path,
+    label: str | None,
+    updated: str,
+    *,
+    heatmap_available: bool = False,
+    lang: str | None = None,
 ) -> str:
-    """Render the landing page from the aggregate output files."""
+    """Render the landing page from the aggregate output files.
+
+    ``lang`` is a catalog language (the default language when None); a
+    None ``label`` takes the catalog's default label in that language.
+    """
+    code = i18n.language(lang)["code"]
+    if label is None:
+        label = t("label.default", code)
     summary = json.loads((input_dir / "summary.json").read_text(encoding="utf-8"))
     monthly = _read_counts(input_dir / "monthly.csv")
     categories = _read_counts(input_dir / "categories.csv")
@@ -252,44 +254,68 @@ def build_index(
 
     by_month = summary.get("by_month") or {}
     peak = (
-        _month_year(max(by_month.items(), key=lambda item: item[1])[0] + "-01")
+        _month_year(max(by_month.items(), key=lambda item: item[1])[0] + "-01", code)
         if by_month
         else "-"
     )
     date_range = summary.get("date_range") or {}
     period = " - ".join(
-        _month_year(str(date_range.get(edge, ""))) for edge in ("first", "last")
+        _month_year(str(date_range.get(edge, "")), code) for edge in ("first", "last")
     ).strip(" -")
     median_days = (summary.get("closure") or {}).get("median_days")
 
     cards = [
-        _card(f"{summary['total_incidents']:,}", "דיווחים"),
-        _card(period or "-", "תקופה"),
-        _card(peak, "החודש העמוס"),
+        _card(f"{summary['total_incidents']:,}", t("card.reports", code)),
+        _card(period or "-", t("card.period", code)),
+        _card(peak, t("card.peak", code)),
     ]
     if isinstance(median_days, (int, float)):
-        cards.append(_card(_median_text(float(median_days)), "זמן טיפול חציוני"))
+        cards.append(
+            _card(_median_text(float(median_days), code), t("card.median", code))
+        )
 
     plates = _read_plates(input_dir)
     plates_link = (
-        '<li><a href="data/plates.csv">רכבים חוזרים</a></li>' if plates else ""
+        f'<li><a href="data/plates.csv">{t("plates.title", code)}</a></li>'
+        if plates
+        else ""
     )
     heatmap_link = (
-        '<li><a href="heatmap.html">מפת חום של מוקדים חמים</a></li>'
+        f'<li><a href="{i18n.page_name("heatmap", code)}">'
+        f"{t('index.link.heatmap', code)}</a></li>"
         if heatmap_available
         else ""
     )
     return PAGE.format(
+        html_attrs=i18n.html_attrs(code),
+        title=t("site.title", code),
+        alternates=i18n.alternate_links("index"),
         css=CSS,
+        intro=t("index.intro", code),
+        draft_notice=i18n.draft_notice(code),
+        picker=i18n.picker("index", code),
         cards="".join(cards),
-        monthly_chart=vbar_chart(monthly[-12:]),
-        categories_chart=hbar_chart(categories[:6]),
-        streets_chart=hbar_chart(streets[:6]),
-        plates_section=_plates_section(plates),
+        h_monthly=t("index.monthly", code),
+        monthly_chart=vbar_chart(monthly[-12:], lang=code),
+        h_categories=t("index.categories", code),
+        categories_chart=hbar_chart(categories[:6], lang=code),
+        h_streets=t("index.streets", code),
+        streets_chart=hbar_chart(streets[:6], lang=code),
+        plates_section=_plates_section(plates, code),
+        h_links=t("index.links", code),
+        l_report=t("index.link.report", code),
+        l_summary_note=t("index.link.summary_note", code),
+        l_monthly=t("index.link.monthly", code),
+        l_categories=t("index.link.categories", code),
+        l_streets=t("index.link.streets", code),
         plates_link=plates_link,
         heatmap_link=heatmap_link,
-        label=html.escape(label),
-        updated=html.escape(updated),
+        footer=t(
+            "index.footer",
+            code,
+            label=f"<bdi>{html.escape(label)}</bdi>",
+            updated=html.escape(updated),
+        ),
     )
 
 
@@ -370,7 +396,7 @@ def check_shape(input_dir: Path) -> list[str]:
 def _build_heatmap(
     input_dir: Path, updated: str, geocoding: Path | None, basemap: Path | None
 ) -> dict[str, str] | None:
-    """Render heatmap.html + heatmap.json from floored street counts (#1).
+    """Render one heat map page per catalog language + heatmap.json (#1).
 
     Returns {} when there is nothing to map or no private mapping was
     given (stale copies are removed by the caller), None on a data error.
@@ -390,33 +416,53 @@ def _build_heatmap(
         if not cells:
             return {}
         lines = heatmap_mod.load_basemap(basemap) if basemap is not None else None
-        return {
-            "heatmap.html": heatmap_mod.build_heatmap_html(
-                cells, unmapped, below, updated, basemap_lines=lines
-            ),
-            "heatmap.json": heatmap_mod.build_heatmap_json(
-                cells, unmapped, below, updated
-            ),
-            # First-party zoom/pan script, served same-origin under
-            # script-src 'self' (#28); static content, no requests.
-            "data/map.js": heatmap_mod.MAP_JS,
+        files = {
+            i18n.page_name("heatmap", code): heatmap_mod.build_heatmap_html(
+                cells, unmapped, below, updated, basemap_lines=lines, lang=code
+            )
+            for code in i18n.codes()
         }
+        files["heatmap.json"] = heatmap_mod.build_heatmap_json(
+            cells, unmapped, below, updated
+        )
+        # First-party zoom/pan script, served same-origin under
+        # script-src 'self' (#28); static content, no requests.
+        files["data/map.js"] = heatmap_mod.MAP_JS
+        return files
     except (ValueError, KeyError, TypeError, OSError) as exc:
         print(f"publish: heat map error: {exc}", file=sys.stderr)
         return None
 
 
+def _page_language(name: str) -> str | None:
+    """The catalog language of a generated page name, None for data files."""
+    for code in i18n.codes():
+        for base in ("index", "heatmap"):
+            if name == i18n.page_name(base, code):
+                return code
+    return None
+
+
 def publish(
     input_dir: Path,
     public_dir: Path,
-    label: str,
+    label: str | None,
     geocoding: Path | None = None,
     basemap: Path | None = None,
 ) -> int:
+    """Publish behind the privacy gate: one page set per catalog language.
+
+    ``label`` is shown on every language's landing page; None takes each
+    language's default label from the catalog.
+    """
     findings = scan_output(input_dir)
     # The label is free text that lands on the landing page; scan it with
     # the same privacy rules before anything is written.
-    findings.extend(str(f) for f in scan_lines("--label", label.splitlines(), set()))
+    labels = (
+        [label] if label is not None else [t("label.default", c) for c in i18n.codes()]
+    )
+    for text in labels:
+        findings.extend(str(f) for f in scan_lines("--label", text.splitlines(), set()))
     if findings:
         for finding in findings:
             print(f"publish: refused: {finding}", file=sys.stderr)
@@ -426,21 +472,28 @@ def publish(
     if heatmap_files is None:
         print("publish: refused: heat map build failed", file=sys.stderr)
         return 1
-    try:
-        index_text = build_index(
-            input_dir, label, updated, heatmap_available=bool(heatmap_files)
-        )
-    except (ValueError, KeyError, TypeError) as exc:
-        print(f"publish: refused: index build failed: {exc}", file=sys.stderr)
-        return 1
-    index_findings = [
-        str(f) for f in scan_lines("index.html", index_text.splitlines(), set())
-    ]
-    if index_findings:
-        for finding in index_findings:
-            print(f"publish: refused: {finding}", file=sys.stderr)
-        return 1
-    index_text = add_analytics(index_text)
+    index_pages: dict[str, str] = {}
+    for code in i18n.codes():
+        name = i18n.page_name("index", code)
+        try:
+            index_text = build_index(
+                input_dir,
+                label,
+                updated,
+                heatmap_available=bool(heatmap_files),
+                lang=code,
+            )
+        except (ValueError, KeyError, TypeError) as exc:
+            print(f"publish: refused: index build failed: {exc}", file=sys.stderr)
+            return 1
+        index_findings = [
+            str(f) for f in scan_lines(name, index_text.splitlines(), set())
+        ]
+        if index_findings:
+            for finding in index_findings:
+                print(f"publish: refused: {finding}", file=sys.stderr)
+            return 1
+        index_pages[name] = add_analytics(index_text, lang=code)
     for name, text in heatmap_files.items():
         findings = [str(f) for f in scan_lines(name, text.splitlines(), set())]
         if findings:
@@ -454,13 +507,10 @@ def publish(
         if name.startswith("data/"):
             target = public_dir / name
         if name.endswith(".html"):
-            text = add_analytics(text)
+            text = add_analytics(text, lang=_page_language(name))
         target.write_text(text, encoding="utf-8")
-    for stale in (
-        public_dir / "heatmap.html",
-        data_dir / "heatmap.json",
-        data_dir / "basemap.svg",
-    ):
+    stale_pages = [public_dir / i18n.page_name("heatmap", c) for c in i18n.codes()]
+    for stale in (*stale_pages, data_dir / "heatmap.json", data_dir / "basemap.svg"):
         if not heatmap_files and stale.exists():
             stale.unlink()
     if heatmap_files and (data_dir / "basemap.svg").exists():
@@ -484,8 +534,10 @@ def publish(
             copied += 1
         elif dst.exists():
             dst.unlink()
-    (public_dir / "index.html").write_text(index_text, encoding="utf-8")
-    print(f"publish: {copied} files -> {public_dir} ({label})")
+    for name, text in index_pages.items():
+        (public_dir / name).write_text(text, encoding="utf-8")
+    shown = label if label is not None else labels[0]
+    print(f"publish: {copied} files -> {public_dir} ({shown})")
     return 0
 
 
@@ -501,8 +553,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--label",
-        default="דיווחי 106 מצטברים",
-        help="data-source label shown on the landing page",
+        default=None,
+        help="data-source label shown on every language's landing page "
+        "(default: the catalog's label in each language)",
     )
     parser.add_argument(
         "--geocoding",

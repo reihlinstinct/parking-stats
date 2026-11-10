@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import html
 
+from .i18n import tn
+
 INK = "#1e293b"
 BAR = "#2563eb"
 BAR_ALT = "#0d9488"
@@ -19,7 +21,9 @@ def _e(text: str) -> str:
     return html.escape(text, quote=True)
 
 
-def vbar_chart(rows: list[tuple[str, int]], *, color: str = BAR) -> str:
+def vbar_chart(
+    rows: list[tuple[str, int]], *, color: str = BAR, lang: str | None = None
+) -> str:
     """Vertical bars, e.g. monthly counts; labels below the axis."""
     if not rows:
         return ""
@@ -29,7 +33,8 @@ def vbar_chart(rows: list[tuple[str, int]], *, color: str = BAR) -> str:
     bar_w = max(6.0, slot * 0.62)
     parts = [
         f'<svg viewBox="0,0,{width},{height}" role="img" '
-        f'aria-label="{len(rows)} עמודות" xmlns="http://www.w3.org/2000/svg">'
+        f'aria-label="{_e(tn("chart.bars", len(rows), lang))}" '
+        'xmlns="http://www.w3.org/2000/svg">'
     ]
     y_base = height - pad_b
     span = y_base - pad_t
@@ -57,8 +62,15 @@ def vbar_chart(rows: list[tuple[str, int]], *, color: str = BAR) -> str:
     return "".join(parts)
 
 
-def hbar_chart(rows: list[tuple[str, int]], *, color: str = BAR_ALT) -> str:
-    """Horizontal bars, e.g. top categories/streets; label right of bar (RTL)."""
+def hbar_chart(
+    rows: list[tuple[str, int]], *, color: str = BAR_ALT, lang: str | None = None
+) -> str:
+    """Horizontal bars, e.g. top categories/streets; label right of bar (RTL).
+
+    The labels are city data (Hebrew street and category names), so the
+    bar layout stays right-to-left on every page; only the aria label
+    follows ``lang``.
+    """
     if not rows:
         return ""
     row_h = 30
@@ -70,7 +82,8 @@ def hbar_chart(rows: list[tuple[str, int]], *, color: str = BAR_ALT) -> str:
     span = width - label_w - 50
     parts = [
         f'<svg viewBox="0,0,{width},{height}" role="img" '
-        f'aria-label="{len(rows)} שורות" xmlns="http://www.w3.org/2000/svg">'
+        f'aria-label="{_e(tn("chart.rows", len(rows), lang))}" '
+        'xmlns="http://www.w3.org/2000/svg">'
     ]
     for i, (label, count) in enumerate(rows):
         y = i * row_h + 6
