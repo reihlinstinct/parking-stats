@@ -11,6 +11,34 @@ MOD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MOD)
 
 
+def _process_gone_or_zombie(status):
+    # /proc can disappear when init reaps an orphan between polling steps.
+    try:
+        return status.read_text().split()[2] == "Z"
+    except FileNotFoundError:
+        return True
+
+
+class ProcessStatusTests(unittest.TestCase):
+    def test_reaped_process_is_gone(self):
+        status = MagicMock()
+        status.read_text.side_effect = FileNotFoundError
+        self.assertTrue(_process_gone_or_zombie(status))
+
+    def test_zombie_is_gone_but_live_process_is_not(self):
+        for state, expected in (("Z", True), ("S", False), ("R", False)):
+            with self.subTest(state=state):
+                status = MagicMock()
+                status.read_text.return_value = f"123 (python) {state} 1"
+                self.assertEqual(_process_gone_or_zombie(status), expected)
+
+    def test_other_read_errors_are_not_hidden(self):
+        status = MagicMock()
+        status.read_text.side_effect = PermissionError
+        with self.assertRaises(PermissionError):
+            _process_gone_or_zombie(status)
+
+
 class PrivateFetchTests(unittest.TestCase):
     def test_diagnostic_no_untrusted_prose(self):
         for error in (ValueError("PRIVATE\n::warning::path"), MOD.FetchError([], {})):
@@ -183,7 +211,7 @@ class PrivateFetchTests(unittest.TestCase):
             # it must not be running after the parent cleanup returns.
             for _ in range(50):
                 status = Path(f"/proc/{pid}/stat")
-                if not status.exists() or status.read_text().split()[2] == "Z":
+                if _process_gone_or_zombie(status):
                     break
                 time.sleep(0.02)
             else:
