@@ -73,8 +73,20 @@ def classify_error(stage, error):
 def check_budget(root, deadline, stage):
     if time.monotonic() >= deadline:
         raise FetchError(stage, "timeout")
+
+    def walk_error(error):
+        # Git's internal directories can disappear during pack cleanup. Every
+        # source-directory error must instead fail closed, without its path.
+        try:
+            relative = Path(error.filename).relative_to(root)
+        except (TypeError, ValueError):
+            raise classify_error(stage, error) from None
+        if isinstance(error, FileNotFoundError) and ".git" in relative.parts:
+            return
+        raise classify_error(stage, error) from None
+
     total = 0
-    for directory, dirs, files in os.walk(root, followlinks=False):
+    for directory, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
         for name in files:
             path = Path(directory) / name
             try:

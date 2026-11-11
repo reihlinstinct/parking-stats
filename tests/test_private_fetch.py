@@ -109,6 +109,54 @@ class PrivateFetchTests(unittest.TestCase):
                 "private_source_fetch_failed stage=checkout code=filesystem_missing",
             )
 
+    def test_walk_errors_fail_closed_except_missing_git_directory(self):
+        import errno
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for relative, number, expected in (
+                ("current/.git/objects/pack", errno.ENOENT, None),
+                ("current/reports", errno.ENOENT, "filesystem_missing"),
+                ("current/.git/objects", errno.EACCES, "filesystem_denied"),
+                ("current/reports", errno.EACCES, "filesystem_denied"),
+            ):
+
+                def fake_walk(*args, **kwargs):
+                    kwargs["onerror"](
+                        OSError(number, "PRIVATE/token", str(root / relative))
+                    )
+                    return iter(())
+
+                with patch.object(MOD.os, "walk", side_effect=fake_walk):
+                    if expected is None:
+                        MOD.check_budget(root, float("inf"), "fetch")
+                    else:
+                        with self.assertRaises(MOD.FetchError) as error:
+                            MOD.check_budget(root, float("inf"), "fetch")
+                        self.assertEqual(
+                            MOD.diagnostic(error.exception),
+                            "private_source_fetch_failed stage=fetch code=" + expected,
+                        )
+
+    def test_unknown_walk_filename_fails_closed_without_prose(self):
+        import errno
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for filename in (None, "/outside/PRIVATE"):
+
+                def fake_walk(*args, **kwargs):
+                    kwargs["onerror"](OSError(errno.EACCES, "PRIVATE/token", filename))
+                    return iter(())
+
+                with patch.object(MOD.os, "walk", side_effect=fake_walk):
+                    with self.assertRaises(MOD.FetchError) as error:
+                        MOD.check_budget(root, float("inf"), "checkout")
+                self.assertEqual(
+                    MOD.diagnostic(error.exception),
+                    "private_source_fetch_failed stage=checkout code=filesystem_denied",
+                )
+
     def test_fixed_error_classification_never_prints_exception(self):
         import errno
 
@@ -441,6 +489,55 @@ class NarrowFetchTests(unittest.TestCase):
             self.assertEqual(
                 MOD.diagnostic(error.exception),
                 "private_source_fetch_failed stage=checkout code=filesystem_full",
+            )
+            self.assertFalse((Path(tmp) / "parking-private").exists())
+
+    def test_cleanup_error_classified_and_private_material_removed(self):
+        import errno
+
+        with tempfile.TemporaryDirectory() as tmp:
+
+            def fake_git(
+                path, args, env, root, deadline, stage, capture=False, max_output=1024
+            ):
+                if args[0] == "init":
+                    (path / ".git").mkdir()
+                if stage == "revision":
+                    return b"a" * 40 + b"\n"
+                if stage == "checkout" and args[0] == "ls-tree":
+                    return (
+                        b"100644 blob " + b"b" * 40 + b"\t" + args[-1].encode() + b"\0"
+                    )
+                if stage == "checkout":
+                    return (
+                        b"folder_id,metadata_record,ref_mapping\n"
+                        b"row,reports/row/report.json,verified\n"
+                        if args[-1].endswith(":ledger/reports.csv")
+                        else b"{}"
+                    )
+                return b""
+
+            original = MOD.shutil.rmtree
+
+            def fail_git_cleanup(path, *args, **kwargs):
+                if Path(path).name == ".git":
+                    raise OSError(errno.EACCES, "PRIVATE/token/path")
+                return original(path, *args, **kwargs)
+
+            with (
+                patch.dict(
+                    MOD.os.environ,
+                    {"RUNNER_TEMP": tmp, "PARKING_SOURCE_READ_TOKEN": "synthetic"},
+                ),
+                patch.object(MOD, "git", side_effect=fake_git),
+                patch.object(MOD.shutil, "rmtree", side_effect=fail_git_cleanup),
+                patch("sys.stdout"),
+            ):
+                with self.assertRaises(MOD.FetchError) as error:
+                    MOD.main()
+            self.assertEqual(
+                MOD.diagnostic(error.exception),
+                "private_source_fetch_failed stage=cleanup code=filesystem_denied",
             )
             self.assertFalse((Path(tmp) / "parking-private").exists())
 
