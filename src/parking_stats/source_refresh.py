@@ -24,6 +24,8 @@ DIAGNOSTIC_CODES = frozenset(
     [
         "artifact_privacy",
         "artifact_size",
+        "city_events_event",
+        "city_events_schema",
         "baseline_case",
         "baseline_conflict",
         "baseline_conflicts",
@@ -145,6 +147,8 @@ DECRYPT_TIMEOUT = 60
 OUTPUTS = frozenset(
     {"public/data/recovered-summary.json", "public/data/source-freshness.json"}
 )
+PAGE = "public/index.html"
+PUBLISHED = OUTPUTS | {PAGE}
 FRESH_KEYS = frozenset(
     {
         "schema_version",
@@ -153,6 +157,8 @@ FRESH_KEYS = frozenset(
         "email_snapshot_at",
         "email_refresh_mode",
         "email_stale",
+        "city_events_snapshot_at",
+        "live_city_status",
     }
 )
 
@@ -160,16 +166,19 @@ FRESH_KEYS = frozenset(
 def freshness(value: Any) -> None:
     if not isinstance(value, dict) or set(value) != FRESH_KEYS:
         raise UnionError("freshness_schema")
-    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+    if type(value["schema_version"]) is not int or value["schema_version"] != 2:
         raise UnionError("freshness_version")
     if (
         value["refresh_mode"] != "private_checkout_pull"
         or value["email_refresh_mode"] != "historical_snapshot_not_live"
         or value["email_stale"] is not True
+        or value["live_city_status"] is not False
     ):
         raise UnionError("freshness_mode")
-    for key in ("ledger_observed_at", "email_snapshot_at"):
+    for key in ("ledger_observed_at", "email_snapshot_at", "city_events_snapshot_at"):
         stamp = value[key]
+        if stamp is None and key == "city_events_snapshot_at":
+            continue
         if not isinstance(stamp, str):
             raise UnionError("freshness_time")
         try:
@@ -188,14 +197,14 @@ def run_git(root: Path, *args: str) -> bytes:
     return result.stdout
 
 
-def diff_gate(root: Path) -> None:
+def diff_gate(root: Path, allowed: frozenset[str] = OUTPUTS) -> None:
     changed = run_git(root, "diff", "--name-only", "-z", "HEAD").decode().split("\0")
     untracked = (
         run_git(root, "ls-files", "--others", "--exclude-standard", "-z")
         .decode()
         .split("\0")
     )
-    if not set(changed + untracked) - {""} <= OUTPUTS:
+    if not set(changed + untracked) - {""} <= allowed:
         raise UnionError("unexpected_public_diff")
     for name in OUTPUTS:
         path = root / name

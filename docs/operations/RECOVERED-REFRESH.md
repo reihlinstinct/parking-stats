@@ -1,3 +1,7 @@
+> Superseded by [AUTOMATIC-REFRESH.md](AUTOMATIC-REFRESH.md). The manual
+> `recovered-refresh.yml` candidate workflow below remains as a no-publish
+> dry run.
+
 # Recovered refresh: parked synthetic wiring
 
 The recovered-refresh workflow is manual and synthetic only. It calls the actual

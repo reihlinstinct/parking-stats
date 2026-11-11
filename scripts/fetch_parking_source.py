@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 TOTAL_SECONDS = 300
+CITY_EVENTS = "ledger/stats-city-events.json"
 MAX_CHECKOUT_BYTES = 200 * 1024 * 1024
 STAGES = frozenset(
     {"startup", "initialize", "fetch", "revision", "checkout", "cleanup"}
@@ -106,9 +107,14 @@ def required_paths(raw):
             raise ValueError
         paths = set()
         for index, row in enumerate(reader):
+            # Surplus cells are tolerated only when every one is empty (older
+            # rows carry trailing commas); a non-empty overflow is rejected,
+            # mirroring the builder's ledger_overflow rule.
+            extra = row.pop(None, [])
             if (
                 index >= 10000
-                or None in row
+                or not isinstance(extra, list)
+                or any(extra)
                 or any(value is None for value in row.values())
             ):
                 raise ValueError
@@ -194,11 +200,13 @@ def main():
 
             # A partial shallow fetch downloads trees/commits only. Materialize
             # exactly ledger + validated references, never all photos or scripts.
-            def materialize(relative):
+            def materialize(relative, optional=False):
                 entry = run(
                     "checkout", "ls-tree", "-z", sha, "--", relative, capture=True
                 )
                 if not entry:
+                    if optional:
+                        return None
                     raise FetchError("checkout", "missing_path")
                 # Reject trees, executable files and symlinks before lazy blob fetch.
                 try:
@@ -232,6 +240,9 @@ def main():
                 raw = materialize("ledger/reports.csv")
                 for relative in required_paths(raw):
                     materialize(relative)
+                # Independent city opening events (aggregate-safe envelope, no
+                # PII); absent until the private repo first publishes one.
+                materialize(CITY_EVENTS, optional=True)
             else:
                 materialize("private/recovered-cases/union.json.age")
             shutil.rmtree(path / ".git")

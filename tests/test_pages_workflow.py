@@ -10,7 +10,10 @@ class PagesWorkflowTests(unittest.TestCase):
         workflow = (
             Path(__file__).parents[1] / ".github/workflows/pages.yml"
         ).read_text()
-        upload = re.search(r"^          name: (.+)$", workflow, re.MULTILINE)
+        workflow = workflow[workflow.index("\n  deploy:") :]
+        upload = re.search(
+            r"^          name: (github-pages-.+)$", workflow, re.MULTILINE
+        )
         deploy = re.search(r"^          artifact_name: (.+)$", workflow, re.MULTILINE)
         self.assertIsNotNone(upload)
         self.assertIsNotNone(deploy)

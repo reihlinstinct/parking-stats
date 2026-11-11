@@ -86,6 +86,42 @@ def _timestamp(value: Any) -> str:
     return value
 
 
+CITY_EVENTS_PATH = "ledger/stats-city-events.json"
+CITY_FIELDS = frozenset({"createdon", "streetname", "subjectname"})
+
+
+def _city_events(private: Reader) -> tuple[list[dict[str, Any]], str | None]:
+    """Strictly validate the optional city-opening-event envelope.
+
+    Absent file means no city events (None snapshot). Present means it must be
+    exactly {schema_version:1, snapshot_at, events}; every event is a
+    city_email event carrying only reviewed reducer fields. Replay and
+    per-event validation then happen in union.reduce_events.
+    """
+    path = private.root / CITY_EVENTS_PATH
+    if not path.is_symlink() and not path.exists():
+        return [], None
+    envelope = private.obj(CITY_EVENTS_PATH)
+    if set(envelope) != {"schema_version", "snapshot_at", "events"}:
+        raise UnionError("city_events_schema")
+    if type(envelope["schema_version"]) is not int or envelope["schema_version"] != 1:
+        raise UnionError("city_events_schema")
+    snapshot = _timestamp(envelope["snapshot_at"])
+    events = envelope["events"]
+    if not isinstance(events, list) or len(events) > MAX_CASES:
+        raise UnionError("city_events_schema")
+    for event in events:
+        if (
+            not isinstance(event, dict)
+            or event.get("origin") != "city_email"
+            or not isinstance(event.get("fields"), dict)
+            or not set(event["fields"]) <= CITY_FIELDS
+        ):
+            raise UnionError("city_events_event")
+        _timestamp(event.get("observed_at"))
+    return events, snapshot
+
+
 def build(
     private_root: Path,
     decrypted_root: Path,
@@ -153,6 +189,8 @@ def build(
                 fields={item["field"]: item.get("email_value")},
             )
         )
+    city_events, city_snapshot = _city_events(private)
+    events.extend(city_events)
     csv_text = private.text("ledger/reports.csv")
     try:
         csv_input = csv.DictReader(io.StringIO(csv_text), strict=True)
@@ -220,9 +258,20 @@ def build(
             # Validate referenced folder record but never execute it or infer
             # additional fields from arbitrary nested metadata.
             private.obj(record_path)
+        if row.get("ref_mapping") == "unverified_fifo":
+            # A FIFO guess is not an identity: never derive a case number from
+            # the row (its two reference columns may even disagree). The
+            # independent city events carry those case numbers.
+            unresolved.add(folder)
+            continue
         ref = (row.get("municipal_ref") or "").strip()
         alternate = (row.get("municipal_event_number") or "").strip()
         valid = ref if CASE.fullmatch(ref) else None
+        if re.fullmatch(r"[0-9a-fA-F-]{36}", alternate):
+            # A UUID in the event-number column is a transport ID, not a case
+            # number: ignore it; the row stays unresolved unless municipal_ref
+            # is itself a valid case number.
+            alternate = ""
         if alternate:
             if not CASE.fullmatch(alternate) or (valid and alternate != valid):
                 raise UnionError("ledger_reference_conflict")
@@ -256,12 +305,14 @@ def build(
         events, streets=streets, categories=categories, unresolved_rows=len(unresolved)
     )
     freshness = {
-        "schema_version": 1,
+        "schema_version": 2,
         "refresh_mode": "private_checkout_pull",
         "ledger_observed_at": observed,
         "email_snapshot_at": snapshot,
         "email_refresh_mode": "historical_snapshot_not_live",
         "email_stale": True,
+        "city_events_snapshot_at": city_snapshot,
+        "live_city_status": False,
     }
     if scan_lines("source-freshness.json", json.dumps(freshness).splitlines(), set()):
         raise UnionError("freshness_privacy")

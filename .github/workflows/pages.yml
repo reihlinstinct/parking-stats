@@ -1,9 +1,23 @@
 name: Pages
 
+# Refresh and publish. On every push to main, every 6 hours and on demand, the
+# `refresh` job rebuilds the aggregate statistics from the private source and
+# the `deploy` job publishes them. Nothing is committed or pushed: the live
+# site is built from main plus three regenerated aggregate files, so the
+# refresh needs no write token, no PR and no paid minutes (public repository).
+# Design: docs/operations/AUTOMATIC-REFRESH.md.
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '17 */6 * * *'
   workflow_dispatch:
+    inputs:
+      # refresh=false deploys the committed snapshot as is, without rebuilding
+      # the statistics from the private source.
+      refresh:
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -13,8 +27,128 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  refresh:
+    name: Refresh aggregates
+    # Only the upstream repository on main may reach the private-source secrets
+    # (the parking-source-main environment also admits exactly main).
+    if: >-
+      github.repository == 'reihlinstinct/parking-stats' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_dispatch' || inputs.refresh)
+    environment: parking-source-main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Verify trusted context
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -eu
+          test "$REPOSITORY" = reihlinstinct/parking-stats
+          test "$REF" = refs/heads/main
+          case "$EVENT" in push|schedule|workflow_dispatch) ;; *) exit 1 ;; esac
+          umask 077
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: public-repo
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+      - name: Quiet fixed private-source fetch
+        env:
+          PARKING_SOURCE_READ_TOKEN: ${{ secrets.PARKING_SOURCE_READ_TOKEN }}
+        run: python public-repo/scripts/fetch_parking_source.py
+      - name: Install system age
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq age >/dev/null
+      - name: Build validated aggregates
+        env:
+          AGE_IDENTITY: ${{ secrets.PARKING_RECOVERED_AGE_IDENTITY }}
+          PYTHONPATH: public-repo/src
+        run: |
+          set -eu
+          umask 077
+          test -n "$AGE_IDENTITY"
+          mkdir -p "$RUNNER_TEMP/parking-refresh"
+          printf '%s\n' "$AGE_IDENTITY" > "$RUNNER_TEMP/parking-refresh/identity"
+          unset AGE_IDENTITY
+          python -m parking_stats.source_refresh \
+            --public "$GITHUB_WORKSPACE/public-repo" \
+            --private "$RUNNER_TEMP/parking-private/current" \
+            --baseline "$RUNNER_TEMP/parking-private/baseline" \
+            --config "$GITHUB_WORKSPACE/public-repo/config/parking-source.json" \
+            --identity "$RUNNER_TEMP/parking-refresh/identity" \
+            --temporary "$RUNNER_TEMP/parking-refresh" \
+            --observed "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
+      - name: Render landing page from the aggregates
+        working-directory: public-repo
+        env:
+          PYTHONPATH: src
+        run: python -m parking_stats.recovered_page --public . --config config/parking-source.json
+      - name: Validate the three published files
+        working-directory: public-repo
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m parking_stats.privacy_scan .
+          python -c 'from pathlib import Path; from parking_stats.source_refresh import PUBLISHED, artifact_gate, diff_gate; diff_gate(Path("."), PUBLISHED); artifact_gate(Path("."))'
+          git diff --check
+      - name: Upload aggregate-only site files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: refreshed-site
+          path: |
+            public-repo/public/index.html
+            public-repo/public/data/recovered-summary.json
+            public-repo/public/data/source-freshness.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Summary
+        env:
+          PYTHONPATH: public-repo/src
+        run: |
+          python - >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ["GITHUB_WORKSPACE"]) / "public-repo/public/data"
+          summary = json.loads((root / "recovered-summary.json").read_text())
+          fresh = json.loads((root / "source-freshness.json").read_text())
+          print("Refreshed the aggregate statistics (counts only; no case ids, plates or paths).")
+          print()
+          print("- case identifiers:", summary["case_identifiers"])
+          print("- ledger rows without a verified case join:", summary["unresolved_rows"])
+          print("- missing opening date:", summary["missing_opening_date"])
+          print("- opening dates:", summary["from_date"], "to", summary["through"])
+          print("- city events saved at:", fresh["city_events_snapshot_at"])
+          print("- city status is historical, never live")
+          PY
+      - name: Always remove private material
+        if: always()
+        run: |
+          rm -f -- "$GITHUB_WORKSPACE/public-repo/public/index.html" "$GITHUB_WORKSPACE/public-repo/public/data/recovered-summary.json" "$GITHUB_WORKSPACE/public-repo/public/data/source-freshness.json"
+          rm -rf -- "$RUNNER_TEMP/parking-private" "$RUNNER_TEMP/parking-refresh"
+
   deploy:
     name: Deploy static report
+    needs: refresh
+    # Fail closed: a failed refresh never deploys. The committed snapshot is
+    # deployed only when the refresh was deliberately skipped (manual run with
+    # refresh=false) or cannot exist (a fork).
+    if: >-
+      !cancelled() && (
+        needs.refresh.result == 'success' ||
+        (needs.refresh.result == 'skipped' && (
+          github.repository != 'reihlinstinct/parking-stats' ||
+          (github.event_name == 'workflow_dispatch' && !inputs.refresh)
+        ))
+      )
     permissions:
       contents: read
       pages: write
@@ -32,12 +166,36 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: pyproject.toml
-      # Fail closed: the privacy gate runs inside the deploy itself, so no
-      # artifact can be published without a clean scan of public/.
       - name: Install package
         run: python -m pip install .
+      - name: Download refreshed files
+        if: needs.refresh.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: refreshed-site
+          path: ${{ runner.temp }}/refreshed
+      - name: Overlay exactly the three refreshed files
+        if: needs.refresh.result == 'success'
+        env:
+          REFRESHED: ${{ runner.temp }}/refreshed
+        run: |
+          set -eu
+          # The artifact is rooted at public/ (the common parent of the three
+          # uploaded paths); accept exactly these regular files and nothing else.
+          expected="$(printf '%s\n' data/recovered-summary.json data/source-freshness.json index.html)"
+          found="$(cd "$REFRESHED" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)"
+          if [ "$found" != "$expected" ] || [ -n "$(find "$REFRESHED" -type l)" ]; then
+            echo "refreshed artifact has unexpected contents" >&2
+            exit 1
+          fi
+          for f in $expected; do cp -- "$REFRESHED/$f" "public/$f"; done
+      # Fail closed: the privacy gate runs inside the deploy itself, so no
+      # artifact can be published without a clean scan of public/.
       - name: Privacy-scan public/ before deploy
         run: python -m parking_stats.privacy_scan .
+      - name: Re-validate the refreshed aggregates
+        if: needs.refresh.result == 'success'
+        run: python -c 'from pathlib import Path; from parking_stats.source_refresh import artifact_gate; artifact_gate(Path("."))'
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:

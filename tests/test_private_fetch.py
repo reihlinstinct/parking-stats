@@ -182,7 +182,7 @@ class PrivateFetchTests(unittest.TestCase):
                 with self.assertRaises(MOD.FetchError) as error:
                     MOD.main()
             self.assertEqual(error.exception.code, "timeout")
-            self.assertEqual(len(stages), 13)
+            self.assertEqual(len(stages), 12)
             self.assertIn("checkout", stages)
             self.assertEqual(set(deadlines), {300})
             self.assertFalse((Path(tmp) / "parking-private").exists())
@@ -340,6 +340,7 @@ class NarrowFetchTests(unittest.TestCase):
                             [
                                 "baseline/private/recovered-cases/union.json.age",
                                 "current/ledger/reports.csv",
+                                "current/ledger/stats-city-events.json",
                                 "current/reports/row/report.json",
                             ],
                         )
