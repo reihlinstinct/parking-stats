@@ -78,6 +78,57 @@ class PrivateFetchTests(unittest.TestCase):
                     MOD.check_budget(root, float("inf"), "fetch")
                 self.assertEqual(error.exception.code, "size_limit")
 
+    def test_git_transient_file_removed_during_scan_is_safe(self):
+        # Reproduce Git's pack/lock rename between os.walk and lstat.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            transient = root / "current/.git/objects/pack/tmp_pack_synthetic"
+            transient.parent.mkdir(parents=True)
+            transient.write_bytes(b"pack")
+            original = Path.lstat
+
+            def disappear(path, *args, **kwargs):
+                if path == transient:
+                    MOD.os.unlink(transient)
+                    raise FileNotFoundError(2, "PRIVATE/token/path")
+                return original(path, *args, **kwargs)
+
+            with patch.object(Path, "lstat", disappear):
+                MOD.check_budget(root, float("inf"), "checkout")
+
+    def test_missing_materialized_source_still_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "report.json"
+            source.write_bytes(b"{}")
+            with patch.object(Path, "lstat", side_effect=FileNotFoundError):
+                with self.assertRaises(MOD.FetchError) as error:
+                    MOD.check_budget(root, float("inf"), "checkout")
+            self.assertEqual(
+                MOD.diagnostic(error.exception),
+                "private_source_fetch_failed stage=checkout code=filesystem_missing",
+            )
+
+    def test_fixed_error_classification_never_prints_exception(self):
+        import errno
+
+        for number, expected in (
+            (errno.ENOENT, "filesystem_missing"),
+            (errno.EACCES, "filesystem_denied"),
+            (errno.ENOSPC, "filesystem_full"),
+            (errno.EIO, "filesystem_io"),
+        ):
+            error = OSError(number, "PRIVATE\n::warning::token", "/private/path")
+            self.assertEqual(
+                MOD.diagnostic(MOD.classify_error("checkout", error)),
+                "private_source_fetch_failed stage=checkout code=" + expected,
+            )
+        error = ValueError("PRIVATE\n::warning::token")
+        self.assertEqual(
+            MOD.diagnostic(MOD.classify_error("checkout", error)),
+            "private_source_fetch_failed stage=checkout code=internal_error",
+        )
+
     def test_git_timeout_kills_child_and_does_not_leak(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -356,6 +407,42 @@ class NarrowFetchTests(unittest.TestCase):
                         any(str(a).endswith((".jpg", ".png", ".py")) for a in args)
                     )
                 self.assertEqual(len({d for a, s, d in calls}), 1)
+
+    def test_lazy_blob_os_error_keeps_stage_and_cleans_private_data(self):
+        import errno
+
+        with tempfile.TemporaryDirectory() as tmp:
+
+            def fake_git(
+                path, args, env, root, deadline, stage, capture=False, max_output=1024
+            ):
+                if args[0] == "init":
+                    (path / ".git").mkdir()
+                if stage == "revision":
+                    return b"a" * 40 + b"\n"
+                if stage == "checkout" and args[0] == "ls-tree":
+                    return (
+                        b"100644 blob " + b"b" * 40 + b"\t" + args[-1].encode() + b"\0"
+                    )
+                if stage == "checkout":
+                    raise OSError(errno.ENOSPC, "PRIVATE/token/path")
+                return b""
+
+            with (
+                patch.dict(
+                    MOD.os.environ,
+                    {"RUNNER_TEMP": tmp, "PARKING_SOURCE_READ_TOKEN": "synthetic"},
+                ),
+                patch.object(MOD, "git", side_effect=fake_git),
+                patch("sys.stdout"),
+            ):
+                with self.assertRaises(MOD.FetchError) as error:
+                    MOD.main()
+            self.assertEqual(
+                MOD.diagnostic(error.exception),
+                "private_source_fetch_failed stage=checkout code=filesystem_full",
+            )
+            self.assertFalse((Path(tmp) / "parking-private").exists())
 
 
 class RealNarrowFetchTests(unittest.TestCase):
