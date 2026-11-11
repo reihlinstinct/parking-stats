@@ -33,3 +33,5 @@ src/parking_stats/source_refresh.py raw-export-column
 # "description"; no raw exports here, waive only that rule (same false
 # positive as pyproject.toml and the scanner itself above).
 tools/check_repo_layout.py raw-export-key
+# City-event envelope tests: synthetic case numbers in the reducer's key names.
+tests/test_city_events.py raw-export-key

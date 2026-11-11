@@ -49,8 +49,8 @@ rolls the live data back.
 
 `ledger/stats-city-events.json` is `{"schema_version": 1, "snapshot_at": <aware
 timestamp>, "events": [...]}`. Each event is
-`{"origin": "city_email", "case_number", "source_id", "observed_at", "fields"}`
-with `fields` limited to `createdon`, `streetname` and `subjectname`. No names,
+an object with the keys `origin` (always `city_email`), the full municipal
+number, `source_id`, `observed_at` and `fields`, with `fields` limited to `createdon`, `streetname` and `subjectname`. No names,
 plates or message bodies. A missing file means no city events. Any other shape
 fails the whole refresh. Events join the baseline by exact full case number, so
 an email receipt and a ledger row for the same case count once, and conflicting

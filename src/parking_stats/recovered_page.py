@@ -164,7 +164,7 @@ def build_page(public: Path, config: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="recovered_page")
     parser.add_argument("--public", type=Path, required=True, help="repo checkout")
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args(argv)
