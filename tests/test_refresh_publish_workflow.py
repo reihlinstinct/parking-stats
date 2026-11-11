@@ -301,6 +301,31 @@ class GateIntegrityTests(unittest.TestCase):
             for item in job["steps"]:
                 self.assertNotIn("continue-on-error", item, item.get("name"))
 
+    def test_gate_steps_have_exact_mappings_and_no_defaults(self):
+        """No step-level if/shell/working-directory drift, no defaults."""
+        self.assertNotIn("defaults", DOC)
+        for name, job in JOBS.items():
+            self.assertNotIn("defaults", job, name)
+            for item in job["steps"]:
+                self.assertNotIn("shell", item, item.get("name"))
+        pythonpath = {"PYTHONPATH": "src"}
+        expected = {
+            ("refresh", "Validate the three published files"): {
+                "working-directory": "public-repo",
+                "env": pythonpath,
+            },
+            ("deploy", "Privacy-scan public/ before deploy"): {},
+            ("deploy", "Re-validate the refreshed aggregates"): {
+                "if": "needs.refresh.result == 'success'",
+            },
+        }
+        for (job, name), extra in expected.items():
+            with self.subTest(step=name):
+                mapping = {
+                    k: v for k, v in step(job, name).items() if k not in ("name", "run")
+                }
+                self.assertEqual(mapping, extra)
+
     def test_gate_commands_are_exact(self):
         expected = {
             ("refresh", "Validate the three published files"): (
