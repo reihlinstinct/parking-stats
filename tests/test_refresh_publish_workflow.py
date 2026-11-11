@@ -62,10 +62,6 @@ class RefreshPublishWorkflowTests(unittest.TestCase):
                 self.assertRegex(line, r"@[0-9a-f]{40} # ")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 # ---- Parsed-workflow tests (PyYAML): conditions, step order, overlay script ----
 import re  # noqa: E402
 import subprocess  # noqa: E402
@@ -88,6 +84,7 @@ def evaluate(expression, **context):
         "needs.refresh.result": "needs_refresh_result",
         "github.repository": "github_repository",
         "github.event_name": "github_event_name",
+        "github.ref": "github_ref",
         "inputs.refresh": "inputs_refresh",
     }
     text = squash(expression)
@@ -292,3 +289,103 @@ class OverlayScriptTests(unittest.TestCase):
                 code, copied = self.run_overlay(build)
                 self.assertNotEqual(code, 0)
                 self.assertEqual(copied, {})
+
+
+class GateIntegrityTests(unittest.TestCase):
+    """Gates cannot be neutralised: exact commands, no continue-on-error."""
+
+    def test_no_job_or_step_may_continue_on_error(self):
+        self.assertNotIn("continue-on-error", TEXT)
+        for name, job in JOBS.items():
+            self.assertNotIn("continue-on-error", job, name)
+            for item in job["steps"]:
+                self.assertNotIn("continue-on-error", item, item.get("name"))
+
+    def test_gate_commands_are_exact(self):
+        expected = {
+            ("refresh", "Validate the three published files"): (
+                "python -m parking_stats.privacy_scan .\n"
+                "python -c 'from pathlib import Path; "
+                "from parking_stats.source_refresh import PUBLISHED, artifact_gate, diff_gate; "
+                'diff_gate(Path("."), PUBLISHED); artifact_gate(Path("."))\'\n'
+                "git diff --check\n"
+            ),
+            ("deploy", "Privacy-scan public/ before deploy"): (
+                "python -m parking_stats.privacy_scan ."
+            ),
+            ("deploy", "Re-validate the refreshed aggregates"): (
+                "python -c 'from pathlib import Path; "
+                "from parking_stats.source_refresh import artifact_gate; "
+                'artifact_gate(Path("."))\''
+            ),
+        }
+        for (job, name), run in expected.items():
+            with self.subTest(step=name):
+                self.assertEqual(step(job, name)["run"], run)
+
+    def test_refresh_main_ref_gate_is_exact_in_condition_and_at_runtime(self):
+        self.assertEqual(
+            squash(JOBS["refresh"]["if"]),
+            "github.repository == 'reihlinstinct/parking-stats' && "
+            "github.ref == 'refs/heads/main' && "
+            "(github.event_name != 'workflow_dispatch' || inputs.refresh)",
+        )
+        guard = step("refresh", "Verify trusted context")
+        self.assertEqual(
+            guard["env"],
+            {
+                "REPOSITORY": "${{ github.repository }}",
+                "REF": "${{ github.ref }}",
+                "EVENT": "${{ github.event_name }}",
+            },
+        )
+        self.assertEqual(
+            guard["run"],
+            "set -eu\n"
+            'test "$REPOSITORY" = reihlinstinct/parking-stats\n'
+            'test "$REF" = refs/heads/main\n'
+            'case "$EVENT" in push|schedule|workflow_dispatch) ;; *) exit 1 ;; esac\n'
+            "umask 077\n",
+        )
+        self.assertEqual(JOBS["refresh"]["steps"][0]["name"], "Verify trusted context")
+
+    def test_refresh_condition_truth_table(self):
+        condition = JOBS["refresh"]["if"]
+        refs = ("refs/heads/main", "refs/heads/feature", "refs/tags/v1")
+        for repo in (UPSTREAM, "someone/fork"):
+            for ref in refs:
+                for event, refresh in (
+                    ("push", None),
+                    ("schedule", None),
+                    ("workflow_dispatch", True),
+                    ("workflow_dispatch", False),
+                    ("pull_request", None),
+                ):
+                    expected = (
+                        repo == UPSTREAM
+                        and ref == "refs/heads/main"
+                        and (event != "workflow_dispatch" or bool(refresh))
+                    )
+                    with self.subTest(repo=repo, ref=ref, event=event, refresh=refresh):
+                        self.assertIs(
+                            evaluate(
+                                condition,
+                                github_repository=repo,
+                                github_ref=ref,
+                                github_event_name=event,
+                                inputs_refresh=refresh,
+                            ),
+                            expected,
+                        )
+
+    def test_pages_artifact_path_is_public_only(self):
+        upload = next(
+            s
+            for s in JOBS["deploy"]["steps"]
+            if s.get("uses", "").startswith("actions/upload-pages-artifact")
+        )
+        self.assertEqual(upload["with"]["path"], "public/")
+
+
+if __name__ == "__main__":
+    unittest.main()
