@@ -2,11 +2,13 @@
 
 import base64
 import csv
+import errno
 import io
 import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -29,6 +31,11 @@ CODES = frozenset(
         "other",
         "missing_path",
         "source_path",
+        "filesystem_missing",
+        "filesystem_denied",
+        "filesystem_full",
+        "filesystem_io",
+        "internal_error",
     }
 )
 
@@ -47,6 +54,22 @@ def diagnostic(error):
     return "private_source_fetch_failed stage=startup code=other"
 
 
+def classify_error(stage, error):
+    """Only fixed codes, never exception text, filenames, URLs or stderr."""
+    if type(error) is FetchError:
+        return error
+    if isinstance(error, OSError):
+        code = {
+            errno.ENOENT: "filesystem_missing",
+            errno.EACCES: "filesystem_denied",
+            errno.EPERM: "filesystem_denied",
+            errno.ENOSPC: "filesystem_full",
+            errno.EDQUOT: "filesystem_full",
+        }.get(error.errno, "filesystem_io")
+        return FetchError(stage, code)
+    return FetchError(stage, "internal_error")
+
+
 def check_budget(root, deadline, stage):
     if time.monotonic() >= deadline:
         raise FetchError(stage, "timeout")
@@ -54,9 +77,19 @@ def check_budget(root, deadline, stage):
     for directory, dirs, files in os.walk(root, followlinks=False):
         for name in files:
             path = Path(directory) / name
-            if path.is_symlink():
+            try:
+                metadata = path.lstat()
+            except FileNotFoundError:
+                # Git atomically renames/removes transient pack/lock files while
+                # this monitor walks .git. They are not materialized source data.
+                if ".git" in path.relative_to(root).parts:
+                    continue
+                raise FetchError(stage, "filesystem_missing") from None
+            except OSError as error:
+                raise classify_error(stage, error) from None
+            if stat.S_ISLNK(metadata.st_mode):
                 raise FetchError(stage, "other")
-            total += path.stat().st_size
+            total += metadata.st_size
             if total > MAX_CHECKOUT_BYTES:
                 raise FetchError(stage, "size_limit")
 
@@ -159,13 +192,15 @@ def main():
             path = root / folder
             path.mkdir(mode=0o700)
 
-            def run(stage, *args, capture=False):
+            def run(stage, *args, capture=False, max_output=1024):
                 try:
-                    return git(path, args, env, root, deadline, stage, capture)
+                    return git(
+                        path, args, env, root, deadline, stage, capture, max_output
+                    )
                 except FetchError:
                     raise
-                except Exception:
-                    raise FetchError(stage, "other") from None
+                except Exception as error:
+                    raise classify_error(stage, error) from None
 
             run("initialize", "init", "-q")
             run(
@@ -220,19 +255,21 @@ def main():
                         raise ValueError
                 except (ValueError, UnicodeError):
                     raise FetchError("checkout", "source_path") from None
-                raw = git(
-                    path,
-                    ["-c", "core.hooksPath=/dev/null", "show", sha + ":" + relative],
-                    env,
-                    root,
-                    deadline,
+                raw = run(
                     "checkout",
-                    True,
-                    20 * 1024 * 1024,
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "show",
+                    sha + ":" + relative,
+                    capture=True,
+                    max_output=20 * 1024 * 1024,
                 )
                 destination = path / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(raw)
+                try:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(raw)
+                except OSError as error:
+                    raise classify_error("checkout", error) from None
                 check_budget(root, deadline, "checkout")
                 return raw
 
@@ -245,7 +282,10 @@ def main():
                 materialize(CITY_EVENTS, optional=True)
             else:
                 materialize("private/recovered-cases/union.json.age")
-            shutil.rmtree(path / ".git")
+            try:
+                shutil.rmtree(path / ".git")
+            except OSError as error:
+                raise classify_error("cleanup", error) from None
     except BaseException:
         shutil.rmtree(root, ignore_errors=True)
         raise
