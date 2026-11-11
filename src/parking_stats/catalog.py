@@ -327,4 +327,121 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "he": "נתונים מצטברים בלבד &middot; עודכן: {updated}",
         "fr": "Données agrégées uniquement &middot; Mis à jour : {updated}",
     },
+    # Recovered snapshot landing page (recovered_page.py)
+    "recovered.title": {
+        "he": "פניות 106 - תמונת מצב משוחזרת",
+        "fr": "Demandes 106 - état des lieux reconstitué",
+    },
+    "recovered.tag": {
+        "he": "ירושלים · פניות 106",
+        "fr": "Jérusalem · demandes 106",
+    },
+    "recovered.h1": {
+        "he": "תמונת מצב משוחזרת",
+        "fr": "État des lieux reconstitué",
+    },
+    "recovered.lede": {
+        "he": "איחוד פרטי של ייצוא היסטורי, ספר ההגשות ואישורי פתיחה מהעירייה. באתר מוצגות ספירות בלבד.",
+        "fr": "Fusion privée d'un export historique, du registre des dépôts et des accusés d'ouverture de la mairie. Seuls des décomptes sont publiés.",
+    },
+    "recovered.ledger_refreshed": {
+        "he": "רענון אוטומטי אחרון של הספר: {when}",
+        "fr": "Dernière actualisation automatique du registre : {when}",
+    },
+    "recovered.card_total": {
+        "he": "מספרי פנייה שונים ששוחזרו",
+        "fr": "numéros de demande distincts reconstitués",
+    },
+    "recovered.card_unresolved": {
+        "he": "שורות בספר ללא שיוך מאומת למספר פנייה, לא נוספו לסך",
+        "fr": "lignes du registre sans rattachement vérifié à un numéro de demande, non ajoutées au total",
+    },
+    "recovered.card_missing": {
+        "he": "פניות ללא תאריך פתיחה מוסכם",
+        "fr": "demandes sans date d'ouverture concordante",
+    },
+    "recovered.notice": {
+        "he": "<strong>זה אינו מספר מוסמך של כל הפניות.</strong> זהו איחוד המקורות שנמצאו, לפי מספר פנייה מלא כולל סיומת. אין כאן ספירת פניות פתוחות כיום, שיעור סגירה או סטטוס חי מהעירייה; כל נתון סטטוס או סגירה הוא היסטורי בלבד.",
+        "fr": "<strong>Ce n'est pas un chiffre officiel de toutes les demandes.</strong> C'est la fusion des sources retrouvées, par numéro de demande complet avec suffixe. Aucun décompte de demandes ouvertes aujourd'hui, taux de clôture ou statut en direct de la mairie ; tout statut ou clôture est historique uniquement.",
+    },
+    "recovered.sources_h": {
+        "he": "מקורות ורענון",
+        "fr": "Sources et actualisation",
+    },
+    "recovered.sources_p": {
+        "he": "הנתונים מתרעננים ומתפרסמים אוטומטית. הספירה משלבת ייצוא היסטורי מוצפן (נכון ל-{snapshot}), את ספר ההגשות הנוכחי ואישורי פתיחה שנשמרו מהעירייה. פנייה שמופיעה ביותר ממקור אחד נספרת פעם אחת.",
+        "fr": "Les données sont actualisées et publiées automatiquement. Le décompte combine un export historique chiffré (au {snapshot}), le registre actuel des dépôts et les accusés d'ouverture conservés de la mairie. Une demande présente dans plusieurs sources n'est comptée qu'une fois.",
+    },
+    "recovered.city_events": {
+        "he": "אישורי פתיחה מהעירייה נשמרו עד {when}. זהו מועד שמירת האישורים, לא בדיקת סטטוס חיה בעירייה.",
+        "fr": "Les accusés d'ouverture de la mairie sont conservés jusqu'au {when}. C'est la date de conservation, pas une vérification en direct du statut.",
+    },
+    "recovered.no_city_events": {
+        "he": "טרם נשמרו אישורי פתיחה עדכניים מהעירייה מעבר לאיחוד ההיסטורי.",
+        "fr": "Aucun accusé d'ouverture récent de la mairie n'est encore conservé au-delà de la fusion historique.",
+    },
+    "recovered.dates": {
+        "he": "תאריכי פתיחה זמינים: <bdi>{first}</bdi> עד <bdi>{last}</bdi>. ב-{missing} פניות אין תאריך פתיחה מוסכם.",
+        "fr": "Dates d'ouverture disponibles : <bdi>{first}</bdi> à <bdi>{last}</bdi>. {missing} demandes n'ont pas de date d'ouverture concordante.",
+    },
+    "recovered.no_dates": {
+        "he": "אין עדיין תאריכי פתיחה זמינים.",
+        "fr": "Aucune date d'ouverture disponible pour l'instant.",
+    },
+    "recovered.categories_h": {
+        "he": "קטגוריות מובילות",
+        "fr": "Principales catégories",
+    },
+    "recovered.streets_h": {
+        "he": "רחובות מובילים",
+        "fr": "Principales rues",
+    },
+    "recovered.group": {
+        "he": "קבוצה",
+        "fr": "Groupe",
+    },
+    "recovered.cases": {
+        "he": "פניות",
+        "fr": "Demandes",
+    },
+    "recovered.unknown": {
+        "he": "אחר / לא ידוע",
+        "fr": "Autre / inconnu",
+    },
+    "recovered.monthly_h": {
+        "he": "לפי חודש פתיחה · {count} החודשים האחרונים עם נתונים",
+        "fr": "Par mois d'ouverture · {count} derniers mois avec données",
+    },
+    "recovered.monthly_p": {
+        "he": "תאריך פתיחה בלבד, ללא החלפה שקטה בתאריך צילום או הגשה. תאריכים סותרים נשארו לא ידועים.",
+        "fr": "Date d'ouverture uniquement, sans substitution silencieuse par la date de photo ou de dépôt. Les dates contradictoires restent inconnues.",
+    },
+    "recovered.data_h": {
+        "he": "הנתונים והארכיון",
+        "fr": "Données et archive",
+    },
+    "recovered.link_summary": {
+        "he": "סיכום משוחזר - JSON מצטבר בלבד",
+        "fr": "Résumé reconstitué - JSON agrégé uniquement",
+    },
+    "recovered.link_freshness": {
+        "he": "זמני רענון המקורות",
+        "fr": "Dates d'actualisation des sources",
+    },
+    "recovered.link_archive": {
+        "he": "ארכיון: תמונת ה-977 עד 2026-11-01",
+        "fr": "Archive : l'état des 977 au 2026-11-01",
+    },
+    "recovered.link_archive_note": {
+        "he": " - לא נתונים חיים ולא חלק נוסף לסך הנוכחי",
+        "fr": " - pas des données en direct, ni une part en plus du total actuel",
+    },
+    "recovered.labels_note": {
+        "he": "שמות קטגוריה ורחוב שלא נכללו ברשימת התוויות הציבוריות המותרות, או שיש להם ערכים סותרים, נכללים ב״אחר / לא ידוע״. קטגוריות כוללות גם שירות ומידע, לא רק מפגעי רכב.",
+        "fr": "Les catégories et rues absentes de la liste publique autorisée, ou aux valeurs contradictoires, sont regroupées sous « Autre / inconnu ». Les catégories incluent aussi le service et l'information, pas seulement les infractions de stationnement.",
+    },
+    "recovered.footer": {
+        "he": "אין כאן מזהי פנייה, לוחיות או נתונים גולמיים מהאיחוד המשוחזר. הקישורים לארכיון מציגים תמונת מצב ישנה.",
+        "fr": "Aucun identifiant de demande, plaque ou donnée brute de la fusion reconstituée. Les liens d'archive montrent un état ancien.",
+    },
 }

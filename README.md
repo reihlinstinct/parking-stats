@@ -60,6 +60,13 @@ and inlined into the map SVG at publish time with a wide margin so
 panning still shows streets (`--basemap PATH` or
 `PARKING_STATS_BASEMAP`).
 
+### Automatic refresh
+
+The landing page rebuilds itself from the private source every 6 hours, on
+every push to main and on demand, then deploys without committing anything.
+See [docs/operations/AUTOMATIC-REFRESH.md](docs/operations/AUTOMATIC-REFRESH.md)
+for the flow, the private inputs, failure behavior and cost.
+
 ### Languages
 
 Every visible word of the generated pages (landing page, heat map, chart

@@ -16,12 +16,14 @@ from parking_stats.union import UnionError
 
 STAMP = "2026-11-04T10:00:00+02:00"
 META = dict(
-    schema_version=1,
+    schema_version=2,
     refresh_mode="private_checkout_pull",
     ledger_observed_at=STAMP,
     email_snapshot_at=STAMP,
     email_refresh_mode="historical_snapshot_not_live",
     email_stale=True,
+    city_events_snapshot_at=STAMP,
+    live_city_status=False,
 )
 
 

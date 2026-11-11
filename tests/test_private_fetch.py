@@ -15,7 +15,8 @@ def _process_gone_or_zombie(status):
     # /proc can disappear when init reaps an orphan between polling steps.
     try:
         return status.read_text().split()[2] == "Z"
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        # ESRCH: the process exited between the poll and the read.
         return True
 
 
@@ -23,6 +24,11 @@ class ProcessStatusTests(unittest.TestCase):
     def test_reaped_process_is_gone(self):
         status = MagicMock()
         status.read_text.side_effect = FileNotFoundError
+        self.assertTrue(_process_gone_or_zombie(status))
+
+    def test_exit_during_read_is_gone(self):
+        status = MagicMock()
+        status.read_text.side_effect = ProcessLookupError
         self.assertTrue(_process_gone_or_zombie(status))
 
     def test_zombie_is_gone_but_live_process_is_not(self):
@@ -182,7 +188,7 @@ class PrivateFetchTests(unittest.TestCase):
                 with self.assertRaises(MOD.FetchError) as error:
                     MOD.main()
             self.assertEqual(error.exception.code, "timeout")
-            self.assertEqual(len(stages), 13)
+            self.assertEqual(len(stages), 12)
             self.assertIn("checkout", stages)
             self.assertEqual(set(deadlines), {300})
             self.assertFalse((Path(tmp) / "parking-private").exists())
@@ -340,6 +346,7 @@ class NarrowFetchTests(unittest.TestCase):
                             [
                                 "baseline/private/recovered-cases/union.json.age",
                                 "current/ledger/reports.csv",
+                                "current/ledger/stats-city-events.json",
                                 "current/reports/row/report.json",
                             ],
                         )
