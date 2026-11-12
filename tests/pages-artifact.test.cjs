@@ -55,9 +55,12 @@ test('runner context is confined to Actions origin and backend IDs', () => {
   const context = requestContext(env);
   assert.equal(context.url.href, env.ACTIONS_RESULTS_URL + 'twirp/github.actions.results.api.v1.ArtifactService/ListArtifacts');
   assert.deepEqual(JSON.parse(context.body), {workflowRunBackendId: 'run-123', workflowJobRunBackendId: 'job-456'});
+  const userinfo = new URL(env.ACTIONS_RESULTS_URL);
+  userinfo.username = 'synthetic-user';
+  userinfo.password = 'synthetic-password';
   for (const url of ['http://results-receiver.actions.githubusercontent.com/',
     'https://example.invalid/', 'https://actions.githubusercontent.com.attacker.invalid/',
-    'https://user:pass@results-receiver.actions.githubusercontent.com/']) {
+    userinfo.href]) {
     assert.throws(() => requestContext({...env, ACTIONS_RESULTS_URL: url}));
   }
   assert.throws(() => requestContext({...env, ACTIONS_RUNTIME_TOKEN: 'synthetic'}));

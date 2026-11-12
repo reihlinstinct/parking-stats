@@ -100,3 +100,7 @@ A regression locks its complete schema and static text and proves phone
 matching remains active. The runtime JavaScript, synthetic tests and generated
 outputs have no new allowances. Stage new files before the local privacy scan:
 it reads tracked paths from `git ls-files`, not all untracked files.
+
+Negative URL tests build invented userinfo through the URL API instead of an
+email-shaped URL literal, keeping shared privacy scans strict without a new
+email exception.
