@@ -59,6 +59,8 @@ class RefreshPublishWorkflowTests(unittest.TestCase):
     def test_all_actions_are_sha_pinned(self):
         for line in TEXT.splitlines():
             if line.strip().startswith(("- uses:", "uses:")):
+                if line.strip() == "uses: ./.github/actions/pages-artifact-readiness":
+                    continue  # Local action is checked out at this workflow's SHA.
                 self.assertRegex(line, r"@[0-9a-f]{40} # ")
 
 

@@ -27,7 +27,18 @@ flowchart LR
    as a one-day artifact and always deletes keys, plaintext and checkouts.
 2. `deploy` (environment `github-pages`, no secrets). It downloads the artifact,
    refuses anything but those three regular files, copies them over `public/`,
-   scans `public/` again, re-validates the aggregates and deploys.
+   scans `public/` again and re-validates the aggregates. After uploading the
+   attempt-specific Pages tar, it checks the run's artifact metadata for the
+   exact upload ID/name, positive size. Missing metadata
+   gets at most seven read-only checks, five seconds apart (30 seconds total
+   waiting); malformed, duplicate or mismatched listings fail
+   closed. HTTP errors fail immediately. Only then does one deployment run.
+   This handles observed metadata lag without repeating deployment writes.
+   The local Node action uses the runner's runtime credential with the same
+   internal `ListArtifacts` service as pinned `deploy-pages`, not the REST API
+   (whose visibility can differ). It adds no repository-token permissions,
+   prints no credentials/scopes/response bodies and refuses redirects. Its
+   JavaScript is dependency-free. Offline tests use invented metadata only.
 
 The deploy job fails closed: if the refresh fails, nothing is deployed and the
 previous live site stays. A manual run with `refresh=false` deploys the

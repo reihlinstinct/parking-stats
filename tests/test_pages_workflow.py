@@ -25,3 +25,43 @@ class PagesWorkflowTests(unittest.TestCase):
             expected.replace("${{ github.run_attempt }}", "1"),
             expected.replace("${{ github.run_attempt }}", "2"),
         )
+
+    def test_readiness_uses_upload_output_before_single_deployment(self):
+        import yaml
+
+        workflow = yaml.safe_load(
+            (Path(__file__).parents[1] / ".github/workflows/pages.yml").read_text()
+        )
+        steps = workflow["jobs"]["deploy"]["steps"]
+        upload = next(s for s in steps if s.get("id") == "pages_upload")
+        readiness = next(
+            s
+            for s in steps
+            if s.get("uses") == "./.github/actions/pages-artifact-readiness"
+        )
+        deploys = [
+            s for s in steps if s.get("uses", "").startswith("actions/deploy-pages@")
+        ]
+        self.assertEqual(len(deploys), 1)
+        self.assertLess(steps.index(upload), steps.index(readiness))
+        self.assertLess(steps.index(readiness), steps.index(deploys[0]))
+        self.assertEqual(
+            readiness["with"]["artifact-id"],
+            "${{ steps.pages_upload.outputs.artifact_id }}",
+        )
+        self.assertEqual(readiness["with"]["artifact-name"], upload["with"]["name"])
+        self.assertEqual(
+            readiness["with"]["artifact-name"], deploys[0]["with"]["artifact_name"]
+        )
+
+    def test_readiness_offline_node_regressions(self):
+        import subprocess
+
+        subprocess.run(
+            ["node", "--test", "tests/pages-artifact.test.cjs"],
+            cwd=Path(__file__).parents[1],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
