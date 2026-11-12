@@ -58,12 +58,14 @@ class PagesWorkflowTests(unittest.TestCase):
         import subprocess
 
         subprocess.run(
-            ["node", "--test", "tests/pages-artifact.test.cjs"],
+            ["node", "tests/pages-artifact.test.cjs"],
             cwd=Path(__file__).parents[1],
             check=True,
             capture_output=True,
             text=True,
-            timeout=10,
+            # All service waits are mocked. Allow shared-runner process startup
+            # headroom, without the CLI test runner's extra isolation child.
+            timeout=60,
         )
 
     def test_action_metadata_false_positive_allowance_is_exact(self):

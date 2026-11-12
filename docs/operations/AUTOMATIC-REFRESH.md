@@ -104,3 +104,8 @@ it reads tracked paths from `git ls-files`, not all untracked files.
 Negative URL tests build invented userinfo through the URL API instead of an
 email-shaped URL literal, keeping shared privacy scans strict without a new
 email exception.
+
+Offline Node regressions run directly under `node:test` without an extra CLI
+isolation child. The Python wrapper allows 60 seconds for shared-runner process
+startup and exit; every service wait is mocked. This harness bound does not
+change the production metadata check's 30-second wait budget.
