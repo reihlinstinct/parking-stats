@@ -27,7 +27,18 @@ flowchart LR
    as a one-day artifact and always deletes keys, plaintext and checkouts.
 2. `deploy` (environment `github-pages`, no secrets). It downloads the artifact,
    refuses anything but those three regular files, copies them over `public/`,
-   scans `public/` again, re-validates the aggregates and deploys.
+   scans `public/` again and re-validates the aggregates. After uploading the
+   attempt-specific Pages tar, it checks the run's artifact metadata for the
+   exact upload ID/name, positive size. Missing metadata
+   gets at most seven read-only checks, five seconds apart (30 seconds total
+   waiting); malformed, duplicate or mismatched listings fail
+   closed. HTTP errors fail immediately. Only then does one deployment run.
+   This handles observed metadata lag without repeating deployment writes.
+   The local Node action uses the runner's runtime credential with the same
+   internal `ListArtifacts` service as pinned `deploy-pages`, not the REST API
+   (whose visibility can differ). It adds no repository-token permissions,
+   prints no credentials/scopes/response bodies and refuses redirects. Its
+   JavaScript is dependency-free. Offline tests use invented metadata only.
 
 The deploy job fails closed: if the refresh fails, nothing is deployed and the
 previous live site stays. A manual run with `refresh=false` deploys the
@@ -79,3 +90,27 @@ Failures print only a stage and a code (no source values). Cost is about two
 minutes per run on a free public runner, four runs a day plus one per merge.
 GitHub pauses scheduled workflows after 60 days without repository activity;
 a manual run (Actions, Pages, Run workflow) wakes them.
+
+### Action metadata privacy collision
+
+The new local action's metadata has a required GitHub `description` field,
+which collides with the raw-export-key scanner rule. Its exact file has only
+that rule waived, following the existing package/argparse metadata convention.
+A regression locks its complete schema and static text and proves phone
+matching remains active. The runtime JavaScript, synthetic tests and generated
+outputs have no new allowances. Stage new files before the local privacy scan:
+it reads tracked paths from `git ls-files`, not all untracked files.
+
+Negative URL tests build invented userinfo through the URL API instead of an
+email-shaped URL literal, keeping shared privacy scans strict without a new
+email exception.
+
+Offline Node regressions run directly under `node:test` without an extra CLI
+isolation child. The Python wrapper allows 60 seconds for shared-runner process
+startup and exit; every service wait is mocked. This harness bound does not
+change the production metadata check's 30-second wait budget.
+
+Backend IDs are opaque strings, not a locally invented alphabet. Scope parsing
+follows the artifact toolkit's `Actions.Results:<run>:<job>` three-part format
+and additionally rejects empty or duplicate scopes. Invented underscore IDs
+are covered offline, as are empty/ambiguous scopes.

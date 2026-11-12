@@ -26,6 +26,7 @@
   "directories": {
     ".github": {
       "allow": [
+        "*.cjs",
         "*.yml"
       ]
     },
@@ -60,6 +61,7 @@
     },
     "tests": {
       "allow": [
+        "*.cjs",
         "*.py"
       ]
     },
