@@ -49,12 +49,12 @@ test('invalid expected inputs fail before request', async () => {
 });
 test('runner context is confined to Actions origin and backend IDs', () => {
   const token = 'synthetic.' + Buffer.from(JSON.stringify({
-    scp: 'Actions.Results:run-123:job-456'
+    scp: 'Actions.Results:run_123:job_456'
   })).toString('base64url') + '.synthetic';
   const env = {ACTIONS_RUNTIME_TOKEN: token, ACTIONS_RESULTS_URL: 'https://results-receiver.actions.githubusercontent.com/'};
   const context = requestContext(env);
   assert.equal(context.url.href, env.ACTIONS_RESULTS_URL + 'twirp/github.actions.results.api.v1.ArtifactService/ListArtifacts');
-  assert.deepEqual(JSON.parse(context.body), {workflowRunBackendId: 'run-123', workflowJobRunBackendId: 'job-456'});
+  assert.deepEqual(JSON.parse(context.body), {workflowRunBackendId: 'run_123', workflowJobRunBackendId: 'job_456'});
   const userinfo = new URL(env.ACTIONS_RESULTS_URL);
   userinfo.username = 'synthetic-user';
   userinfo.password = 'synthetic-password';
@@ -64,4 +64,14 @@ test('runner context is confined to Actions origin and backend IDs', () => {
     assert.throws(() => requestContext({...env, ACTIONS_RESULTS_URL: url}));
   }
   assert.throws(() => requestContext({...env, ACTIONS_RUNTIME_TOKEN: 'synthetic'}));
+});
+
+test('empty or ambiguous scope IDs fail closed', () => {
+  for (const scp of ['Actions.Results::job_456', 'Actions.Results:run_123:',
+    'Actions.Results:run_123:job_456:extra',
+    'Actions.Results:run_123:job_456 Actions.Results:run_789:job_789']) {
+    const token = 'synthetic.' + Buffer.from(JSON.stringify({scp})).toString('base64url') + '.synthetic';
+    assert.throws(() => requestContext({ACTIONS_RUNTIME_TOKEN: token,
+      ACTIONS_RESULTS_URL: 'https://results-receiver.actions.githubusercontent.com/'}));
+  }
 });

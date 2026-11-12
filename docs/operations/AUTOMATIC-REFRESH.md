@@ -109,3 +109,8 @@ Offline Node regressions run directly under `node:test` without an extra CLI
 isolation child. The Python wrapper allows 60 seconds for shared-runner process
 startup and exit; every service wait is mocked. This harness bound does not
 change the production metadata check's 30-second wait budget.
+
+Backend IDs are opaque strings, not a locally invented alphabet. Scope parsing
+follows the artifact toolkit's `Actions.Results:<run>:<job>` three-part format
+and additionally rejects empty or duplicate scopes. Invented underscore IDs
+are covered offline, as are empty/ambiguous scopes.

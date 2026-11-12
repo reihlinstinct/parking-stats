@@ -14,7 +14,7 @@ function requestContext(env) {
   const scope = String(claims.scp).split(' ').filter(s => s.startsWith('Actions.Results:'));
   if (scope.length !== 1) throw new Error('Invalid artifact service context');
   const parts = scope[0].split(':');
-  if (parts.length !== 3 || !parts.slice(1).every(p => /^[a-zA-Z0-9-]+$/.test(p))) {
+  if (parts.length !== 3 || !parts.slice(1).every(p => p.length > 0)) {
     throw new Error('Invalid artifact backend IDs');
   }
   return {
