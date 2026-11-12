@@ -90,3 +90,13 @@ Failures print only a stage and a code (no source values). Cost is about two
 minutes per run on a free public runner, four runs a day plus one per merge.
 GitHub pauses scheduled workflows after 60 days without repository activity;
 a manual run (Actions, Pages, Run workflow) wakes them.
+
+### Action metadata privacy collision
+
+The new local action's metadata has a required GitHub `description` field,
+which collides with the raw-export-key scanner rule. Its exact file has only
+that rule waived, following the existing package/argparse metadata convention.
+A regression locks its complete schema and static text and proves phone
+matching remains active. The runtime JavaScript, synthetic tests and generated
+outputs have no new allowances. Stage new files before the local privacy scan:
+it reads tracked paths from `git ls-files`, not all untracked files.

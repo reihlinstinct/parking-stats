@@ -36,3 +36,6 @@ tools/check_repo_layout.py raw-export-key
 # City-event envelope tests: synthetic case numbers in the reducer's key names.
 tests/test_city_events.py raw-export-key
 tests/test_refresh_safeguards.py raw-export-key
+# GitHub action metadata requires the literal description field; exact schema
+# and static text asserted by test_pages_workflow. Other files/rules unchanged.
+.github/actions/pages-artifact-readiness/action.yml raw-export-key
