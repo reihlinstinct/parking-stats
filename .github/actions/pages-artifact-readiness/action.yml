@@ -1,0 +1,12 @@
+name: Pages artifact readiness
+description: Wait for the exact upload in the same metadata service used by deploy-pages
+inputs:
+  artifact-id:
+    description: ID returned by upload-pages-artifact
+    required: true
+  artifact-name:
+    description: Attempt-scoped name passed to deploy-pages
+    required: true
+runs:
+  using: node24
+  main: index.cjs

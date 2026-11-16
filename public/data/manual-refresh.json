@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "refresh_mode": "manual",
+  "refreshed_at": "2026-11-04T11:06:19+02:00",
+  "source_snapshot_at": "2026-11-04T10:47:15+02:00",
+  "basis": "recovered_identifiers_not_certified",
+  "source_counts": {
+    "old_export": 666,
+    "numbered_ledger": 222,
+    "additional_email_identifiers": 130
+  },
+  "ledger_email_overlap_collapsed": 146,
+  "unresolved_rows_not_added": 7
+}
