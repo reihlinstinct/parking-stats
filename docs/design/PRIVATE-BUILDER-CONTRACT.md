@@ -10,7 +10,9 @@ repository. Do not enable until independent review and synthetic CI pass.
 Resolve one immutable private parking-reports commit with read-only credentials.
 Checkout as an immutable data directory, with no submodule/LFS/hooks execution.
 The adapter reads ledger/reports.csv and each nonempty metadata_record only when
-it is exactly reports/<folder_id>/report.json. It rejects symlinks, missing files,
+it is exactly reports/<folder_id>/report.json. Ledger rows whose metadata_record
+points under requests/ are non-parking record families sharing the ledger; the
+adapter skips them entirely (never read, never aggregated, never unresolved). It rejects symlinks, missing files,
 non-files, traversal, duplicate folder IDs, duplicate JSON keys, invalid dates,
 reference conflicts, nonempty overflow CSV cells and bounded-size violations.
 A referenced report JSON is validated as an object, never executed; its nested

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix the broken automatic refresh: ledger rows for non-parking record
+  families (`metadata_record` under `requests/`, for example bicycle-rack
+  requests) are skipped instead of aborting the fetch and the aggregate
+  build. They stay out of the stats; the strict `reports/<folder>/report.json`
+  contract is unchanged for parking rows.
 - Automatic refresh and publish: `pages.yml` now rebuilds the aggregates from
   the private source every 6 hours, on every push to main and on demand, and
   deploys them without committing anything (docs/operations/AUTOMATIC-REFRESH.md).
