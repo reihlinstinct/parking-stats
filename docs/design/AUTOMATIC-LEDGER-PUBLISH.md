@@ -48,7 +48,9 @@ Read only the private ledger and associated report records from a trusted main
 checkout. No raw files, rows, case IDs, names, house numbers, contact identity,
 registry data, photos, free-text notes or paths leave that environment.
 
-- Unique valid folder IDs identify ledger rows; duplicate IDs fail closed.
+- Unique valid folder IDs identify ledger rows; duplicate IDs fail closed. Fail
+  closed means: stop, publish nothing, and report to the private failure channel
+  defined below.
 - Recognize confirmed submission from report.submission.status=submitted or an
   explicit municipal reference. Prepared-only records are excluded from filed
   counts and shown only as an aggregate preparation count if needed.
@@ -75,7 +77,10 @@ Optional repeat plates are published only after at least three confirmed distinc
 cases for that plate, using the already approved plates.csv carrier. Do not add
 all vehicles or registry fields from the unrelated Wix preview builder. First
 release may omit ledger repeat plates until the section/filename policy cleanly
-separates the historical and ledger populations. No threshold dilution.
+separates the historical and ledger populations. No threshold dilution. Small cells and
+timing: any daily or category cell under three cases is bucketed or withheld,
+and no field finer than daily granularity leaves private processing, so neither
+publication timing nor values can encode an individual filing's time.
 
 The historical files remain unchanged. Render the ledger view as the primary
 current section, with a clearly labelled link/section for the historical snapshot.
@@ -106,12 +111,23 @@ If the writer or runner allowance is unavailable, stop and report the exact gap.
 Serialize publisher runs. Re-fetch public main before committing, preserve code
 and historical files, update only the explicit ledger aggregate/rendered allowlist.
 Reject unexpected diff paths. No force push or protection bypass. Identical data
-is a no-op, not a new timestamp-only commit. Retry only transport conflicts with
+is a no-op, not a new timestamp-only commit; the comparison ignores the build
+timestamp and public build revision fields. Retry only transport conflicts with
 a fresh read and same validated source; do not duplicate commits blindly.
 
 Branch protection implications must be checked live: if all public updates need
 PRs, use a normal aggregate-data PR with required checks and an approved bounded
 auto-merge path. Never disable protections to make the pipeline look automatic.
+
+The private failure channel is fixed before the first run: a private issue in
+PRIVATE parking-reports under one agreed label, or the owner's existing private
+alert route; the choice is recorded privately, never on the dashboard or in a
+public issue. Public workflow logs, errors and commit subjects use fixed generic
+strings plus the public run ID only: no counts, folder IDs, paths, source names,
+secret metadata or dates beyond what the published aggregates already carry.
+Sentinel-leak tests plant canary IDs, plates, paths and contact strings in
+fixtures and assert they appear in no public log, error, artifact, commit
+subject or rendered page.
 
 ## Tests and acceptance evidence
 
@@ -121,6 +137,11 @@ aliases, overlap with historical data, strict payload limits and no combined sum
 Regression tests seed forbidden contact strings/raw keys into every output path
 and assert zero public writes. Fail on unexpected carrier/path or plate threshold.
 Test no-op, stale source, concurrent push, provider failure and Pages trigger.
+Acceptance must also show: a revoked or expired credential fails closed with the
+generic public error and a private-channel alert; a concurrent second run exits
+without any write; a failed publish leaves the previous public revision
+byte-identical, never partial; and a stale source renders a visible stale
+indicator, not a fresh-looking badge.
 Run unit+functional container tests and independent exact-head review.
 
 Before shipping, inspect desktop and mobile pixels for source labels, historical
@@ -196,8 +217,12 @@ setup decision through the owner. Until then attachments are a handoff, NOT proo
 of durable encrypted storage. Nothing here authorizes public raw-data storage.
 
 Plaintext is decrypted only for bounded private processing, never retained as a
-CI artifact/cache, sent to a public runner, or printed in logs. The private runner
-must clean plaintext after success/failure. Backups and restore are part of the
+CI artifact/cache or printed in logs. In the private-builder placement that
+processing is the private runner, which must clean plaintext after
+success/failure. The public-runner pull revision below supersedes that placement:
+decryption inside the trusted public workflow's filter job is the single stated
+exception to "never sent to a public runner", and that job carries the same
+cleanup duty on every exit path. Every other boundary in this section stands. Backups and restore are part of the
 storage acceptance: decrypt the committed ciphertext using the approved route,
 verify hashes and schema, rebuild exact identifier counts and provenance, and
 record private evidence. A path in a temporary directory is not this acceptance.
@@ -363,10 +388,20 @@ explicit data/rendered-page path list. Reject every unexpected added/modified/
 deleted path and scan the entire staged diff, commit metadata and resulting public
 tree. No private source or ciphertext belongs in PUBLIC parking-stats, even though
 the secret key is there. Preserve historical carriers and code. Identical semantic
-aggregates are a no-op, not timestamp-only commits. Serialize runs and re-read
+aggregates are a no-op, not timestamp-only commits; build timestamp and public
+build revision are excluded from that comparison. Serialize runs and re-read
 both source and destination after a transport conflict. No force push or branch
 protection bypass. Use ordinary data PR checks/review or an explicitly approved
 bounded automation route; public contents write is separate from source read.
+
+Credential and job isolation: the filter job holds the decryption identity and
+the private-read token and has NO public-write credential; the publish job holds
+the scoped public writer and no decryption or private-read secret. Only the
+schema-validated aggregate artifact crosses from filter to publish, and the
+publish job revalidates it against the same strict schema before any write.
+Public main stays protected with required review; the publisher workflow file,
+the filter/publish code and the public output allowlist are CODEOWNERS-owned
+sensitive paths that require owner review on every change.
 
 The existing Pages deploy must run for the final approved public revision. Verify
 that its event route works with the chosen publishing identity; a default workflow
@@ -416,10 +451,22 @@ The public refresh never depends on this job succeeding and does not wait for it
 
 Schedule the private job once per calendar month, on day one, using a documented
 UTC schedule that is also day one in Asia/Jerusalem. No push/PR triggers, matrix,
-recurring retries, or private build/test/publish chain. Define an idempotent
-month key: if that month's committed encrypted log exists, exit without another
-file. A manual retry, if separately invoked by the authorized owner, must enforce
-the same key and cannot create a duplicate monthly log. Serialize the job.
+recurring retries, or private build/test/publish chain. The month key is YYYY-MM
+in Asia/Jerusalem of the intended scheduled month; a late, retried or manually
+dispatched run uses its intended month key, never the wall-clock month at
+execution. The key is idempotent: if that month's committed encrypted log
+exists, exit without another file. A manual retry, if separately invoked by the
+authorized owner, must enforce the same key and cannot create a duplicate
+monthly log. There is no automatic catch-up: a missed month is recorded as
+missed in the private log index and is filled only by an explicit owner dispatch
+naming that month key. Serialize the job.
+
+Input is the committed ciphertext only; plaintext exists solely in job memory,
+never on disk, in artifacts, caches or logs, and the workspace is wiped on every
+exit path. Recording is atomic: the new encrypted log, its SHA256 and the
+private index entry land in one commit through ordinary protected-branch rules,
+and any failure before that commit leaves prior logs and the index
+byte-identical.
 
 Create only an additive authenticated encrypted log under an explicit monthly
 private path. Encrypt using the approved parking public recipient; encryption
