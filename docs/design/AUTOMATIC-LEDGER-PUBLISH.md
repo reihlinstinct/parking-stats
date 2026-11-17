@@ -95,7 +95,13 @@ The historical files remain unchanged. Render the ledger view as the primary
 current section, with a clearly labelled link/section for the historical snapshot.
 Provide source basis, latest filing day and generated timestamp in Hebrew. A
 build timestamp is not a data-through/status date. Empty data and stale sources
-are visible, never hidden behind a successful deploy badge.
+are visible, never hidden behind a successful deploy badge. Staleness is a
+property of the data-through date, not of build success: the published aggregate
+carries its source date and the page marks itself stale client-side once that
+date passes the documented threshold, so consecutive failed scheduled builds
+still show the stale indicator with no rebuild. A test renders a fixture whose
+source date is past the threshold and asserts the indicator without any
+successful build.
 
 ## Publication and trust boundary
 
@@ -152,11 +158,20 @@ Regression tests seed forbidden contact strings/raw keys into every output path
 and assert zero public writes. Fail on unexpected carrier/path or plate threshold.
 Test no-op, stale source, concurrent push, provider failure and Pages trigger.
 Four named acceptance tests are required: (1) revoked-token: a revoked or
-expired credential fails closed with the generic public error and an owner
-alert; (2) concurrency: a concurrent second run exits without any write;
-(3) rollback: a failed publish leaves the previous public revision
-byte-identical, never partial; (4) stale-source display: a stale source renders
-a visible stale indicator, not a fresh-looking badge.
+expired credential fails closed - the previous public revision stays
+byte-identical, the public output is the fixed generic error, and the test
+asserts the generic failure and exit code, not alert delivery, which depends on
+external notification routes; (2) concurrency: enforced by a workflow-level
+Actions concurrency group limited to one in-flight run with no queue - a second
+trigger exits without any write, and a rerun after the same aggregates already
+published is a no-op; (3) rollback: a failed publish leaves the previous public
+revision byte-identical, never partial, and if a bad revision reaches the live
+page, the last-known-good aggregates are restored through the same protected
+path (normal data PR or the approved bounded automation) with Pages deploying
+that exact restored revision; (4) stale-source display: across consecutive
+failed scheduled runs the page still marks itself stale from a source date past
+the threshold - the indicator never depends on a successful rebuild and never
+looks fresh.
 Run unit+functional container tests and independent exact-head review.
 
 Before shipping, inspect desktop and mobile pixels for source labels, historical
@@ -482,9 +497,11 @@ recorded as missed in the private log index by the next successful monthly run
 and by owner polling of the private schedule, and is filled only by an explicit
 owner dispatch naming that month key. Serialize the job.
 
-The job reads current private source state inside the private repository;
-plaintext exists solely in job memory, never on disk, in artifacts, caches or
-logs, and the workspace is wiped on every exit path. Only authenticated
+Input is the existing committed ciphertext snapshots in the private
+repository, never any public artifact: the job decrypts them in memory through
+the owner's approved private decryption route, builds the monthly snapshot, and
+plaintext exists solely in job memory - never on disk, in artifacts, caches or
+logs - with the workspace wiped on every exit path. Only authenticated
 ciphertext is committed or recorded. Recording is atomic: the new encrypted log, its SHA256 and the
 private index entry land in one commit through ordinary protected-branch rules,
 and any failure before that commit leaves prior logs and the index
