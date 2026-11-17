@@ -242,6 +242,11 @@ def build(
         folders.add(folder)
         if row.get("ref_mapping") == "not_filed_prepared":
             continue
+        if (row.get("metadata_record") or "").startswith("requests/"):
+            # Non-parking record families (for example bicycle-rack requests)
+            # share the ledger; they are not parking cases and stay out of
+            # the aggregates and the unresolved set.
+            continue
         filed = row.get("filed_date")
         try:
             if (

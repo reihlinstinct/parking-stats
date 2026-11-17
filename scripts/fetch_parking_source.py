@@ -169,6 +169,11 @@ def required_paths(raw):
             if row["ref_mapping"] == "not_filed_prepared":
                 continue
             relative = row["metadata_record"]
+            if relative.startswith("requests/"):
+                # Non-parking record families (for example bicycle-rack
+                # requests) share the ledger but are out of scope for the
+                # parking statistics checkout; never materialize them.
+                continue
             if relative:
                 if relative != "reports/" + folder + "/report.json":
                     raise ValueError

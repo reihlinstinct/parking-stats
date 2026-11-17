@@ -362,6 +362,16 @@ class NarrowFetchTests(unittest.TestCase):
             ),
             ["reports/row/report.json"],
         )
+
+    def test_required_paths_skips_requests_family(self):
+        # Non-parking record families (bicycle-rack requests etc.) share the
+        # ledger; they are out of scope and must not fail or be materialized.
+        self.assertEqual(
+            MOD.required_paths(
+                b"folder_id,metadata_record,ref_mapping\nrow,reports/row/report.json,verified\nrack,requests/bicycle-racks/rack/report.json,numeric_receipt_pending\n"
+            ),
+            ["reports/row/report.json"],
+        )
         for path in (
             "../secret",
             "/secret",

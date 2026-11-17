@@ -70,6 +70,26 @@ class PrivateBuilderTests(unittest.TestCase):
             ledger_observed_at=STAMP,
         )
 
+    def test_requests_family_rows_are_skipped(self):
+        # A bicycle-rack request row shares the ledger but is not a parking
+        # case: the build must succeed and ignore it entirely.
+        self.rows.append(
+            dict(
+                folder_id="rack1",
+                filed_date="2026-11-16",
+                municipal_ref="",
+                street="",
+                city_opened_at="",
+                ref_mapping="numeric_receipt_pending",
+                metadata_record="requests/bicycle-racks/rack1/report.json",
+                municipal_event_number="",
+            )
+        )
+        self.write()
+        p, f = self.run_build()
+        self.assertEqual(p["case_identifiers"], 1)
+        self.assertNotIn("rack1", json.dumps([p, f]))
+
     def test_overlap_and_stale_email(self):
         p, f = self.run_build()
         self.assertEqual(p["case_identifiers"], 1)
