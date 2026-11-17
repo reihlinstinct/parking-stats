@@ -21,6 +21,11 @@ flowchart LR
  G --> H[Live data and visual verification]
 ```
 
+Diagram placement note: the private-builder placement drawn above is the
+initial model; the public-runner pull revision below supersedes the builder's
+location. The dedup/aggregate, privacy gates, aggregate-only commit, Pages scan
+and verification steps are unchanged.
+
 ## Data basis: do not invent a union
 
 The public historical export has 977 cases through 2026-11-01. The filing ledger
@@ -78,9 +83,13 @@ cases for that plate, using the already approved plates.csv carrier. Do not add
 all vehicles or registry fields from the unrelated Wix preview builder. First
 release may omit ledger repeat plates until the section/filename policy cleanly
 separates the historical and ledger populations. No threshold dilution. Small cells and
-timing: any daily or category cell under three cases is bucketed or withheld,
-and no field finer than daily granularity leaves private processing, so neither
-publication timing nor values can encode an individual filing's time.
+timing: any daily, category or street cell under three cases is bucketed or
+withheld, and no field finer than daily granularity leaves private processing,
+so neither publication timing nor values can encode an individual filing's time.
+Withheld cells must not be reconstructable by subtraction: when a cell is
+withheld, the totals and the daily and monthly series it feeds are coarsened or
+complementarily suppressed, so differencing published totals and series cannot
+recover it.
 
 The historical files remain unchanged. Render the ledger view as the primary
 current section, with a clearly labelled link/section for the historical snapshot.
@@ -91,7 +100,9 @@ are visible, never hidden behind a successful deploy badge.
 ## Publication and trust boundary
 
 A private main-only workflow triggers on ledger/report metadata changes plus
-manual dispatch. PRs run synthetic tests without public-write credentials.
+manual dispatch in the initial placement; the public-runner pull revision below
+moves this trigger and boundary to the trusted PUBLIC parking-stats workflow on
+protected main. PRs run synthetic tests without public-write credentials.
 Minimal read permissions; public contents writer is scoped to parking-stats only,
 not inherited by checkout or arbitrary PR code. Use a fixed checked/pinned builder
 revision, no execution of fetched data, no user-controlled destination/ref.
@@ -119,10 +130,13 @@ Branch protection implications must be checked live: if all public updates need
 PRs, use a normal aggregate-data PR with required checks and an approved bounded
 auto-merge path. Never disable protections to make the pipeline look automatic.
 
-The private failure channel is fixed before the first run: a private issue in
-PRIVATE parking-reports under one agreed label, or the owner's existing private
-alert route; the choice is recorded privately, never on the dashboard or in a
-public issue. Public workflow logs, errors and commit subjects use fixed generic
+The failure alert route is fixed before the first run and is independent of
+pipeline credentials: the pipeline's private-source token is read-only and must
+not gain write authority for alerting. Alerts reach the owner through GitHub
+Actions failure notifications plus operator polling of public run status, with
+the page's visible stale-source indicator as the user-facing signal; any richer
+private detail goes through the owner's existing private route, recorded
+privately, never on the dashboard or in a public issue. Public workflow logs, errors and commit subjects use fixed generic
 strings plus the public run ID only: no counts, folder IDs, paths, source names,
 secret metadata or dates beyond what the published aggregates already carry.
 Sentinel-leak tests plant canary IDs, plates, paths and contact strings in
@@ -137,11 +151,12 @@ aliases, overlap with historical data, strict payload limits and no combined sum
 Regression tests seed forbidden contact strings/raw keys into every output path
 and assert zero public writes. Fail on unexpected carrier/path or plate threshold.
 Test no-op, stale source, concurrent push, provider failure and Pages trigger.
-Acceptance must also show: a revoked or expired credential fails closed with the
-generic public error and a private-channel alert; a concurrent second run exits
-without any write; a failed publish leaves the previous public revision
-byte-identical, never partial; and a stale source renders a visible stale
-indicator, not a fresh-looking badge.
+Four named acceptance tests are required: (1) revoked-token: a revoked or
+expired credential fails closed with the generic public error and an owner
+alert; (2) concurrency: a concurrent second run exits without any write;
+(3) rollback: a failed publish leaves the previous public revision
+byte-identical, never partial; (4) stale-source display: a stale source renders
+a visible stale indicator, not a fresh-looking badge.
 Run unit+functional container tests and independent exact-head review.
 
 Before shipping, inspect desktop and mobile pixels for source labels, historical
@@ -308,7 +323,9 @@ Store the parking-recovered-cases age decryption identity and a separate private
 source read credential ONLY as secrets in a protected Environment in PUBLIC
 parking-stats. The Environment deployment branch policy must allow exactly the
 trusted main branch, reject all tags and every other ref, and be verified live
-before secret installation. Do not use ordinary repository Actions Secrets for
+before secret installation. Protection under this design relies on that branch
+policy alone; Environment required reviewers are not part of the automatic model
+and no per-run manual approval is assumed. Do not use ordinary repository Actions Secrets for
 these values: a same-repository feature-branch writer could remove a YAML guard
 and access repository secrets. YAML branch checks alone are not a security boundary. The secret values are never source files,
 workflow literals, issues, logs, artifacts, cache entries or public payloads.
@@ -397,8 +414,10 @@ bounded automation route; public contents write is separate from source read.
 Credential and job isolation: the filter job holds the decryption identity and
 the private-read token and has NO public-write credential; the publish job holds
 the scoped public writer and no decryption or private-read secret. Only the
-schema-validated aggregate artifact crosses from filter to publish, and the
-publish job revalidates it against the same strict schema before any write.
+aggregate artifact crosses from filter to publish: it is uploaded only after the
+schema, small-cell and privacy gates pass, with one-day retention and no public
+access, and the publish job revalidates it against the same strict schema
+before any write.
 Public main stays protected with required review; the publisher workflow file,
 the filter/publish code and the public output allowlist are CODEOWNERS-owned
 sensitive paths that require owner review on every change.
@@ -455,15 +474,18 @@ recurring retries, or private build/test/publish chain. The month key is YYYY-MM
 in Asia/Jerusalem of the intended scheduled month; a late, retried or manually
 dispatched run uses its intended month key, never the wall-clock month at
 execution. The key is idempotent: if that month's committed encrypted log
-exists, exit without another file. A manual retry, if separately invoked by the
+exists, or a data PR carrying that month key is already open, exit without
+another file or duplicate PR; resume or reuse the open PR instead. A manual retry, if separately invoked by the
 authorized owner, must enforce the same key and cannot create a duplicate
-monthly log. There is no automatic catch-up: a missed month is recorded as
-missed in the private log index and is filled only by an explicit owner dispatch
-naming that month key. Serialize the job.
+monthly log. There is no automatic catch-up: a missed month is detected and
+recorded as missed in the private log index by the next successful monthly run
+and by owner polling of the private schedule, and is filled only by an explicit
+owner dispatch naming that month key. Serialize the job.
 
-Input is the committed ciphertext only; plaintext exists solely in job memory,
-never on disk, in artifacts, caches or logs, and the workspace is wiped on every
-exit path. Recording is atomic: the new encrypted log, its SHA256 and the
+The job reads current private source state inside the private repository;
+plaintext exists solely in job memory, never on disk, in artifacts, caches or
+logs, and the workspace is wiped on every exit path. Only authenticated
+ciphertext is committed or recorded. Recording is atomic: the new encrypted log, its SHA256 and the
 private index entry land in one commit through ordinary protected-branch rules,
 and any failure before that commit leaves prior logs and the index
 byte-identical.
