@@ -54,8 +54,8 @@ checkout. No raw files, rows, case IDs, names, house numbers, contact identity,
 registry data, photos, free-text notes or paths leave that environment.
 
 - Unique valid folder IDs identify ledger rows; duplicate IDs fail closed. Fail
-  closed means: stop, publish nothing, and report to the private failure channel
-  defined below.
+  closed means: stop, publish nothing, and report through the failure alert
+  route defined below.
 - Recognize confirmed submission from report.submission.status=submitted or an
   explicit municipal reference. Prepared-only records are excluded from filed
   counts and shown only as an aggregate preparation count if needed.
@@ -96,11 +96,14 @@ current section, with a clearly labelled link/section for the historical snapsho
 Provide source basis, latest filing day and generated timestamp in Hebrew. A
 build timestamp is not a data-through/status date. Empty data and stale sources
 are visible, never hidden behind a successful deploy badge. Staleness is a
-property of the data-through date, not of build success: the published aggregate
-carries its source date and the page marks itself stale client-side once that
-date passes the documented threshold, so consecutive failed scheduled builds
-still show the stale indicator with no rebuild. A test renders a fixture whose
-source date is past the threshold and asserts the indicator without any
+property of the data-through date and build age, not of build success: the
+published aggregate carries its source date and its generated timestamp, and
+the page marks itself stale client-side once the generated timestamp is more
+than 48 hours old - builds are scheduled every 6 hours, so the threshold means
+eight consecutive missed builds - independent of any rebuild, so consecutive
+failed scheduled builds still show the stale indicator. The data-through date
+itself stays displayed alongside. A test renders a fixture whose generated
+timestamp is past the 48-hour threshold and asserts the indicator without any
 successful build.
 
 ## Publication and trust boundary
@@ -162,16 +165,22 @@ expired credential fails closed - the previous public revision stays
 byte-identical, the public output is the fixed generic error, and the test
 asserts the generic failure and exit code, not alert delivery, which depends on
 external notification routes; (2) concurrency: enforced by a workflow-level
-Actions concurrency group limited to one in-flight run with no queue - a second
-trigger exits without any write, and a rerun after the same aggregates already
-published is a no-op; (3) rollback: a failed publish leaves the previous public
+Actions concurrency group with cancel-in-progress disabled - at most one
+active run and one pending run at a time; the pending run re-reads source and
+destination when it starts, publishes only when the aggregates differ, and is
+otherwise a no-op; no two runs ever write concurrently; (3) rollback: a failed publish leaves the previous public
 revision byte-identical, never partial, and if a bad revision reaches the live
 page, the last-known-good aggregates are restored through the same protected
 path (normal data PR or the approved bounded automation) with Pages deploying
-that exact restored revision; (4) stale-source display: across consecutive
-failed scheduled runs the page still marks itself stale from a source date past
-the threshold - the indicator never depends on a successful rebuild and never
-looks fresh.
+that exact restored revision, and place a hold: the held source revision is
+recorded privately, scheduled runs publish nothing derived from it, and the
+restored revision stays live until the owner clears the hold after the source
+is fixed. The test asserts the restored bytes are byte-identical to the
+last-known-good, the Pages deployment SHA equals the restore commit, and a
+scheduled run over the held source publishes nothing; (4) stale-source display: across consecutive
+failed scheduled runs the page still marks itself stale from a generated
+timestamp past the 48-hour threshold - the indicator never depends on a
+successful rebuild and never looks fresh.
 Run unit+functional container tests and independent exact-head review.
 
 Before shipping, inspect desktop and mobile pixels for source labels, historical
@@ -498,11 +507,13 @@ and by owner polling of the private schedule, and is filled only by an explicit
 owner dispatch naming that month key. Serialize the job.
 
 Input is the existing committed ciphertext snapshots in the private
-repository, never any public artifact: the job decrypts them in memory through
-the owner's approved private decryption route, builds the monthly snapshot, and
-plaintext exists solely in job memory - never on disk, in artifacts, caches or
-logs - with the workspace wiped on every exit path. Only authenticated
-ciphertext is committed or recorded. Recording is atomic: the new encrypted log, its SHA256 and the
+repository, never any public artifact. The job does not decrypt them: it
+packages the ciphertext with its manifests and hashes into one additive
+encrypted monthly log, consistent with never copying the decryption secret or
+the private-read token into this job. No plaintext exists anywhere in the job -
+not in memory, on disk, in artifacts, caches or logs - and the workspace is
+wiped on every exit path. Only authenticated ciphertext is committed or
+recorded. Recording is atomic: the new encrypted log, its SHA256 and the
 private index entry land in one commit through ordinary protected-branch rules,
 and any failure before that commit leaves prior logs and the index
 byte-identical.
