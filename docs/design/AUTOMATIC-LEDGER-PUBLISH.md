@@ -95,16 +95,19 @@ The historical files remain unchanged. Render the ledger view as the primary
 current section, with a clearly labelled link/section for the historical snapshot.
 Provide source basis, latest filing day and generated timestamp in Hebrew. A
 build timestamp is not a data-through/status date. Empty data and stale sources
-are visible, never hidden behind a successful deploy badge. Staleness is a
-property of the data-through date and build age, not of build success: the
-published aggregate carries its source date and its generated timestamp, and
-the page marks itself stale client-side once the generated timestamp is more
-than 48 hours old - builds are scheduled every 6 hours, so the threshold means
-eight consecutive missed builds - independent of any rebuild, so consecutive
-failed scheduled builds still show the stale indicator. The data-through date
-itself stays displayed alongside. A test renders a fixture whose generated
-timestamp is past the 48-hour threshold and asserts the indicator without any
-successful build.
+are visible, never hidden behind a successful deploy badge. Staleness reflects pipeline health, never data freshness: unchanged aggregates
+are a no-op success, so the aggregate's own timestamps must not drive the
+indicator. The page fetches the last successful scheduled publisher run from
+the public Actions API client-side and marks itself stale once that success is
+more than 48 hours old - the design cadence is a build every 6 hours, so 48
+hours means eight consecutive missed runs - which needs no rebuild and never
+shows stale merely because the ledger was unchanged. If the API is unreachable
+the page shows freshness unknown, never fresh. The data-through date is
+displayed separately as information, not a freshness claim. The 6-hour cadence
+is the design schedule, not an enabled one. Tests: a fixture with last-success
+older than 48 hours renders stale with no successful build; a no-op success
+refreshes health and clears the indicator; an unreachable API renders freshness
+unknown.
 
 ## Publication and trust boundary
 
@@ -145,7 +148,9 @@ not gain write authority for alerting. Alerts reach the owner through GitHub
 Actions failure notifications plus operator polling of public run status, with
 the page's visible stale-source indicator as the user-facing signal; any richer
 private detail goes through the owner's existing private route, recorded
-privately, never on the dashboard or in a public issue. Public workflow logs, errors and commit subjects use fixed generic
+privately, never on the dashboard or in a public issue. The concrete private
+destination is deliberately not named in this public document; it is chosen and
+recorded privately at setup. Public workflow logs, errors and commit subjects use fixed generic
 strings plus the public run ID only: no counts, folder IDs, paths, source names,
 secret metadata or dates beyond what the published aggregates already carry.
 Sentinel-leak tests plant canary IDs, plates, paths and contact strings in
@@ -166,21 +171,39 @@ byte-identical, the public output is the fixed generic error, and the test
 asserts the generic failure and exit code, not alert delivery, which depends on
 external notification routes; (2) concurrency: enforced by a workflow-level
 Actions concurrency group with cancel-in-progress disabled - at most one
-active run and one pending run at a time; the pending run re-reads source and
-destination when it starts, publishes only when the aggregates differ, and is
-otherwise a no-op; no two runs ever write concurrently; (3) rollback: a failed publish leaves the previous public
+active run and one pending run at a time, and a newer trigger replaces the
+older pending run: latest-pending-wins is safe because the pending run
+re-reads the latest source and destination when it starts, publishes only when
+the aggregates differ, and is otherwise a no-op. No two runs ever write
+concurrently. Restore and hold-clear land as ordinary protected-path commits,
+and the publisher re-reads main immediately before publishing and aborts on
+any unexpected diff, so a mid-run restore or clearance cannot be overwritten.
+The Pages deployment group with cancel-in-progress enabled cancels only
+superseded deployments of newer main content; during a hold the publisher
+pushes nothing, and any other main push already contains the restored
+aggregates, so a cancelled intermediate deployment never resurrects bad data; (3) rollback: a failed publish leaves the previous public
 revision byte-identical, never partial, and if a bad revision reaches the live
 page, the last-known-good aggregates are restored through the same protected
 path (normal data PR or the approved bounded automation) with Pages deploying
-that exact restored revision, and place a hold: the held source revision is
-recorded privately, scheduled runs publish nothing derived from it, and the
-restored revision stays live until the owner clears the hold after the source
-is fixed. The test asserts the restored bytes are byte-identical to the
-last-known-good, the Pages deployment SHA equals the restore commit, and a
-scheduled run over the held source publishes nothing; (4) stale-source display: across consecutive
-failed scheduled runs the page still marks itself stale from a generated
-timestamp past the 48-hour threshold - the indicator never depends on a
-successful rebuild and never looks fresh.
+that exact restored revision, and place a hold: a hold
+marker file in PUBLIC parking-stats, committed by the restore through the same
+protected path, blocks ALL publication - scheduled or manual dispatch - while
+it exists; the publisher checks the marker first, before decrypting or
+publishing, and exits with the generic message. Only the owner's explicit
+clearance, merged through the protected path, removes it, and a descendant
+revision carrying the same bad data is blocked like any other. The publisher
+records the last-known-good aggregate commit SHA privately after each
+successful Pages deployment of that exact commit, and restore uses that
+recorded SHA; during the hold the restored page keeps its original timestamps
+and source date with a visible banner that publication is paused by owner
+hold. Tests assert: restored bytes are byte-identical to the last-known-good,
+the Pages deployment SHA equals the restore commit, a scheduled run AND a
+manual dispatch during the hold publish nothing, and a descendant revision
+with the same bad data stays blocked; (4) stale-source display: across consecutive
+failed scheduled runs the page still marks itself stale from a last-success
+older than 48 hours, an unchanged ledger never shows stale while runs succeed
+as no-ops, and the indicator never depends on a successful rebuild and never
+looks fresh.
 Run unit+functional container tests and independent exact-head review.
 
 Before shipping, inspect desktop and mobile pixels for source labels, historical
@@ -506,14 +529,20 @@ recorded as missed in the private log index by the next successful monthly run
 and by owner polling of the private schedule, and is filled only by an explicit
 owner dispatch naming that month key. Serialize the job.
 
-Input is the existing committed ciphertext snapshots in the private
-repository, never any public artifact. The job does not decrypt them: it
-packages the ciphertext with its manifests and hashes into one additive
-encrypted monthly log, consistent with never copying the decryption secret or
-the private-read token into this job. No plaintext exists anywhere in the job -
-not in memory, on disk, in artifacts, caches or logs - and the workspace is
-wiped on every exit path. Only authenticated ciphertext is committed or
-recorded. Recording is atomic: the new encrypted log, its SHA256 and the
+Input is the existing committed ciphertext snapshots and their outer
+manifests in the private repository, never any public artifact. The job reads
+only the outer manifest (schema version, cipher hash, format): inner provenance
+stays sealed inside the ciphertext, preserved untouched - never read, never
+regenerated - and the only generated metadata is the month key and snapshot
+date, which carry no private values. The job does not decrypt: it packages the
+ciphertext with its manifests and hashes into one additive encrypted monthly
+log, consistent with never copying the decryption secret or the private-read
+token into this job, and envelope validation is hash and format only, not
+decryption. No plaintext exists anywhere in the job - not in memory, on disk,
+in artifacts, caches or logs - and the workspace is wiped on every exit path.
+Only authenticated ciphertext is committed or recorded. A default-token data PR
+does not trigger checks, so the monthly PR is opened by the existing approved
+identity or its checks are run by an owner trigger. Recording is atomic: the new encrypted log, its SHA256 and the
 private index entry land in one commit through ordinary protected-branch rules,
 and any failure before that commit leaves prior logs and the index
 byte-identical.
