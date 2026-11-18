@@ -349,6 +349,27 @@ class RefMarkerTests(unittest.TestCase):
                 with self.assertRaises(UnionError):
                     require_publish_allowed(Path(tmp), Path(tmp), bad)
 
+    def test_missing_ref_fails_closed(self):
+        # A ref that does not resolve is not an absent marker: fail closed.
+        with tempfile.TemporaryDirectory() as tmp:
+            init_repo(Path(tmp))
+            with self.assertRaises(UnionError) as ctx:
+                require_publish_allowed(Path(tmp), Path(tmp), "origin/nonexistent")
+            self.assertEqual(ctx.exception.args, ("public_git",))
+
+    def test_missing_repo_fails_closed(self):
+        # A repo path that is not a git repository fails closed likewise.
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(UnionError) as ctx:
+                require_publish_allowed(Path(tmp), Path(tmp), "origin/main")
+            self.assertEqual(ctx.exception.args, ("public_git",))
+
+    def test_absent_marker_on_valid_ref_still_allows(self):
+        # Guard against regressing the distinction: resolved ref, no marker.
+        with tempfile.TemporaryDirectory() as tmp:
+            init_repo(Path(tmp))
+            require_publish_allowed(Path(tmp), Path(tmp), "origin/main")
+
     def test_cli_ref_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             init_repo(Path(tmp))
