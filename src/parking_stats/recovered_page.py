@@ -115,7 +115,7 @@ def render_body(
         f"<p>{tr('recovered.ledger_refreshed', when=_instant(fresh['ledger_observed_at']))}"
         "</p></div></header><main>"
         '<div id="pipeline-health" class="notice" data-repo="reihlinstinct/parking-stats"'
-        ' data-workflow="publish.yml" hidden></div>'
+        ' data-workflow="pages.yml" hidden></div>'
         f'<div class="cards">{cards}</div>'
         f'<div class="notice">{tr("recovered.notice")}</div>'
         f"<section><h2>{tr('recovered.sources_h')}</h2>"
