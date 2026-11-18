@@ -31,6 +31,19 @@ class PublishPipelineGuardTests(unittest.TestCase):
             DEPLOY.index("check-hold"), DEPLOY.index("upload-pages-artifact")
         )
 
+    def test_boundary_recording_fails_closed(self):
+        # A standalone assignment exits the step under set -e when record-main
+        # fails; the fail-open pattern embeds the substitution in echo.
+        self.assertIn(
+            "MAIN_AT_START=$(python -m parking_stats.publish_guard record-main", TEXT
+        )
+        self.assertNotIn('echo "main_at_start=$(python', TEXT)
+
+    def test_deploy_aborts_on_empty_boundary_after_successful_refresh(self):
+        self.assertIn("REFRESH_RESULT: ${{ needs.refresh.result }}", DEPLOY)
+        self.assertIn('if [ "$REFRESH_RESULT" = "success" ]; then', DEPLOY)
+        self.assertIn('test -n "$MAIN_AT_START"', DEPLOY)
+
     def test_hold_check_precedes_secret_use(self):
         self.assertLess(
             REFRESH.index("check-hold"), REFRESH.index("PARKING_SOURCE_READ_TOKEN")

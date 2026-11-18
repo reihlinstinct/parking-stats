@@ -74,7 +74,11 @@ jobs:
         run: |
           set -eu
           git -C public-repo fetch --depth=1 origin +refs/heads/main:refs/remotes/origin/main
-          echo "main_at_start=$(python -m parking_stats.publish_guard record-main --repo public-repo)" >> "$GITHUB_OUTPUT"
+          # A standalone assignment fails the step under set -e when record-main
+          # fails; embedding the substitution in echo would silently record an
+          # empty value (fail-open).
+          MAIN_AT_START=$(python -m parking_stats.publish_guard record-main --repo public-repo)
+          echo "main_at_start=$MAIN_AT_START" >> "$GITHUB_OUTPUT"
           python -m parking_stats.publish_guard check-hold --public-root public-repo
       - name: Quiet fixed private-source fetch
         env:
@@ -184,11 +188,16 @@ jobs:
         env:
           PYTHONPATH: src
           MAIN_AT_START: ${{ needs.refresh.outputs.main_at_start }}
+          REFRESH_RESULT: ${{ needs.refresh.result }}
         run: |
           set -eu
           git fetch --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           python -m parking_stats.publish_guard check-hold --repo . --ref origin/main
-          if [ -n "$MAIN_AT_START" ]; then
+          # Fail closed: a successful refresh MUST have recorded main; an empty
+          # value aborts instead of skipping the boundary verification. A
+          # skipped refresh (manual refresh=false) has no boundary to verify.
+          if [ "$REFRESH_RESULT" = "success" ]; then
+            test -n "$MAIN_AT_START"
             python -m parking_stats.publish_guard verify-main --repo . --expected "$MAIN_AT_START"
           fi
       - name: Install package
