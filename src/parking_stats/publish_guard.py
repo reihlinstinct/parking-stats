@@ -33,6 +33,7 @@ from pathlib import Path
 from .privacy_scan import scan_lines
 from .union import UnionError
 
+REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9/_.-]{0,99}")
 HOLD_MARKER = "public/data/hold.json"
 HOLD_KEYS = frozenset({"schema_version", "hold", "since", "note"})
 NOTE_LIMIT = 200
@@ -60,6 +61,53 @@ def read_marker(public_root: Path) -> dict[str, object] | None:
         # Invalid UTF-8 fails closed with the generic message; an uncaught
         # decode traceback could leak the marker path into public logs.
         raise UnionError("hold_marker_schema") from None
+    return validate_marker(raw)
+
+
+def read_marker_from_ref(repo: Path, ref: str) -> dict[str, object] | None:
+    """Validated hold marker as committed on a git ref (e.g. origin/main).
+
+    Used by the publish job so a hold that landed after the run started is
+    still caught before any write. An absent marker on a resolved ref means
+    no hold. A ref that does not resolve - missing ref or broken repository -
+    fails closed, because it cannot prove the hold is absent.
+    """
+    if REF_RE.fullmatch(ref) is None or ".." in ref:
+        raise UnionError("public_git")
+    resolved = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"{ref}^{{commit}}",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if resolved.returncode:
+        # Missing ref or repo failure: distinct from an absent marker.
+        raise UnionError("public_git")
+    exists = subprocess.run(
+        ["git", "-C", str(repo), "cat-file", "-e", f"{ref}:{HOLD_MARKER}"],
+        capture_output=True,
+        check=False,
+    )
+    if exists.returncode:
+        return None
+    show = subprocess.run(
+        ["git", "-C", str(repo), "show", f"{ref}:{HOLD_MARKER}"],
+        capture_output=True,
+        check=False,
+    )
+    if show.returncode:
+        raise UnionError("hold_marker_read")
+    return validate_marker(show.stdout.decode("utf-8", errors="replace"))
+
+
+def validate_marker(raw: str) -> dict[str, object]:
     if len(raw) > 4096:
         raise UnionError("hold_marker_schema")
     try:
@@ -87,9 +135,19 @@ def read_marker(public_root: Path) -> dict[str, object] | None:
     return marker
 
 
-def require_publish_allowed(public_root: Path) -> None:
-    """Raise unless the hold marker is absent or cleared."""
-    marker = read_marker(public_root)
+def require_publish_allowed(
+    public_root: Path, repo: Path | None = None, ref: str | None = None
+) -> None:
+    """Raise unless the hold marker is absent or cleared.
+
+    With ``repo`` and ``ref`` the marker is read from that ref instead of the
+    working tree, catching a hold committed after the checkout was made.
+    """
+    marker = (
+        read_marker_from_ref(repo, ref)
+        if repo is not None and ref is not None
+        else read_marker(public_root)
+    )
     if marker is not None and marker["hold"] is True:
         raise UnionError("hold_active")
 
@@ -121,7 +179,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="publish_guard")
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check-hold")
-    check.add_argument("--public-root", type=Path, required=True)
+    check.add_argument("--public-root", type=Path)
+    check.add_argument("--repo", type=Path)
+    check.add_argument("--ref")
     record = sub.add_parser("record-main")
     record.add_argument("--repo", type=Path, required=True)
     verify = sub.add_parser("verify-main")
@@ -130,7 +190,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "check-hold":
-            require_publish_allowed(args.public_root)
+            if (args.repo is None) != (args.ref is None):
+                parser.error("check-hold needs --repo and --ref together")
+            if args.public_root is None and args.repo is None:
+                parser.error("check-hold needs --public-root or --repo/--ref")
+            require_publish_allowed(args.public_root or Path("."), args.repo, args.ref)
             return 0
         if args.command == "record-main":
             print(read_main_sha(args.repo))

@@ -243,3 +243,78 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefMarkerTests(unittest.TestCase):
+    def commit_marker(self, root: Path, payload: object) -> None:
+        write_marker(root, payload)
+        subprocess.run(["git", "-C", str(root), "add", HOLD_MARKER], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-q",
+                "-m",
+                "hold",
+            ],
+            check=True,
+        )
+        sha = (
+            subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+            )
+            .stdout.decode()
+            .strip()
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", sha],
+            check=True,
+        )
+
+    def test_marker_committed_after_checkout_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            init_repo(Path(tmp))
+            # Working tree has no marker, but origin/main carries one.
+            self.commit_marker(Path(tmp), GOOD_MARKER)
+            (Path(tmp) / HOLD_MARKER).unlink()
+            with self.assertRaises(UnionError) as ctx:
+                require_publish_allowed(Path(tmp), Path(tmp), "origin/main")
+            self.assertEqual(ctx.exception.args, ("hold_active",))
+            require_publish_allowed(Path(tmp))  # working-tree mode still clear
+
+    def test_no_marker_on_ref_allows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            init_repo(Path(tmp))
+            require_publish_allowed(Path(tmp), Path(tmp), "origin/main")
+
+    def test_cleared_marker_on_ref_allows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            init_repo(Path(tmp))
+            self.commit_marker(Path(tmp), GOOD_MARKER | {"hold": False})
+            require_publish_allowed(Path(tmp), Path(tmp), "origin/main")
+
+    def test_bad_ref_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            init_repo(Path(tmp))
+            for bad in ("--exec=rm", "origin/main..HEAD", "", "a" * 120):
+                with self.assertRaises(UnionError):
+                    require_publish_allowed(Path(tmp), Path(tmp), bad)
+
+    def test_cli_ref_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            init_repo(Path(tmp))
+            self.assertEqual(
+                main(["check-hold", "--repo", tmp, "--ref", "origin/main"]), 0
+            )
+            self.commit_marker(Path(tmp), GOOD_MARKER)
+            self.assertEqual(
+                main(["check-hold", "--repo", tmp, "--ref", "origin/main"]), 1
+            )
