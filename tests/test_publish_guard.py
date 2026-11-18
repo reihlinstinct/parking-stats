@@ -301,6 +301,47 @@ class RefMarkerTests(unittest.TestCase):
             self.commit_marker(Path(tmp), GOOD_MARKER | {"hold": False})
             require_publish_allowed(Path(tmp), Path(tmp), "origin/main")
 
+    def test_invalid_utf8_marker_on_ref_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_repo(root)
+            path = root / HOLD_MARKER
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"\xff\xfe not utf-8")
+            subprocess.run(["git", "-C", str(root), "add", HOLD_MARKER], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "user.name=t",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "bad marker",
+                ],
+                check=True,
+            )
+            sha = (
+                subprocess.run(
+                    ["git", "-C", str(root), "rev-parse", "HEAD"],
+                    check=True,
+                    capture_output=True,
+                )
+                .stdout.decode()
+                .strip()
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", sha],
+                check=True,
+            )
+            with self.assertRaises(UnionError) as ctx:
+                require_publish_allowed(root, root, "origin/main")
+            self.assertEqual(ctx.exception.args, ("hold_marker_schema",))
+
     def test_bad_ref_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             init_repo(Path(tmp))

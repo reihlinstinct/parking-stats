@@ -104,7 +104,13 @@ def read_marker_from_ref(repo: Path, ref: str) -> dict[str, object] | None:
     )
     if show.returncode:
         raise UnionError("hold_marker_read")
-    return validate_marker(show.stdout.decode("utf-8", errors="replace"))
+    try:
+        raw = show.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        # Strict like the working-tree path: invalid bytes fail closed rather
+        # than being replaced into something that might parse.
+        raise UnionError("hold_marker_schema") from None
+    return validate_marker(raw)
 
 
 def validate_marker(raw: str) -> dict[str, object]:
