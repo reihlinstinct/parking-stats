@@ -36,12 +36,16 @@ def snapshot_month(start: datetime) -> str | None:
 
 def valid_dispatch_key(key: str, now: datetime) -> bool:
     """A dispatch key is exactly YYYY-MM, a real month, and not in the future."""
-    if len(key) != 7 or key[4] != "-":
+    # Exact character contract: int() alone would accept sign- or
+    # space-prefixed digits ("+026", " 1") inside the 7-character envelope.
+    if (
+        len(key) != 7
+        or key[4] != "-"
+        or not all("0" <= c <= "9" for c in key[:4])
+        or not all("0" <= c <= "9" for c in key[5:])
+    ):
         return False
-    try:
-        year, month = int(key[:4]), int(key[5:])
-    except ValueError:
-        return False
+    year, month = int(key[:4]), int(key[5:])
     if not 1 <= month <= 12:
         return False
     local = _aware(now).astimezone(JERUSALEM)

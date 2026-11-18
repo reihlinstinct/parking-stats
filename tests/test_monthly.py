@@ -85,6 +85,12 @@ class DispatchKeyTests(unittest.TestCase):
             "",
             "2026-11-01",
             " 2026-11",
+            "+026-11",
+            "-026-11",
+            " 026-11",
+            "2026-+1",
+            "2026- 1",
+            "2026-١١",
         ):
             self.assertFalse(valid_dispatch_key(key, self.NOW))
 
