@@ -108,16 +108,22 @@ class HoldMarkerTests(unittest.TestCase):
                     require_publish_allowed(Path(tmp))
                 self.assertIn(ctx.exception.args[0], ("hold_marker_schema",))
 
-    def test_marker_with_private_canary_fails_closed(self):
+    def test_marker_with_private_canary_fails_closed_as_privacy(self):
         with tempfile.TemporaryDirectory() as tmp:
-            write_marker(Path(tmp), GOOD_MARKER | {"note": "case 106/12345 folder abc"})
-            try:
+            write_marker(
+                Path(tmp),
+                GOOD_MARKER | {"note": "call 052-1234567 about the case"},
+            )
+            with self.assertRaises(UnionError) as ctx:
                 require_publish_allowed(Path(tmp))
-            except UnionError as exc:
-                self.assertIn(
-                    exc.args[0],
-                    ("hold_marker_privacy", "hold_marker_schema", "hold_active"),
-                )
+            self.assertEqual(ctx.exception.args, ("hold_marker_privacy",))
+
+    def test_clean_active_marker_blocks_as_hold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_marker(Path(tmp), GOOD_MARKER | {"note": "paused by the owner"})
+            with self.assertRaises(UnionError) as ctx:
+                require_publish_allowed(Path(tmp))
+            self.assertEqual(ctx.exception.args, ("hold_active",))
 
     def test_oversized_marker_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
