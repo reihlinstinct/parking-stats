@@ -114,6 +114,8 @@ def render_body(
         f"<h1>{tr('recovered.h1')}</h1><p>{tr('recovered.lede')}</p>"
         f"<p>{tr('recovered.ledger_refreshed', when=_instant(fresh['ledger_observed_at']))}"
         "</p></div></header><main>"
+        '<div id="pipeline-health" class="notice" data-repo="reihlinstinct/parking-stats"'
+        ' data-workflow="publish.yml" hidden></div>'
         f'<div class="cards">{cards}</div>'
         f'<div class="notice">{tr("recovered.notice")}</div>'
         f"<section><h2>{tr('recovered.sources_h')}</h2>"
@@ -134,6 +136,7 @@ def render_body(
         f"{tr('recovered.link_archive_note')}</li></ul>"
         f"<p>{tr('recovered.labels_note')}</p></section>"
         f"<footer>{tr('recovered.footer')}</footer></main>"
+        '<script defer src="data/pipeline-health.js"></script>'
         f"{LOCALIZE.replace('@@LANG@@', code)}</body></html>"
     )
     return body
