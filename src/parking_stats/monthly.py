@@ -12,15 +12,22 @@ that uses these helpers, keyed by the derived or dispatched month key.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 JERUSALEM = ZoneInfo("Asia/Jerusalem")
 
 
+def _aware(value: datetime) -> datetime:
+    """A naive datetime means UTC; never the host's local timezone."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 def snapshot_month(start: datetime) -> str | None:
     """YYYY-MM key for a scheduled run start, or None when the run must exit."""
-    local = start.astimezone(JERUSALEM)
+    local = _aware(start).astimezone(JERUSALEM)
     if local.day == 1 or (local.day == 2 and local.hour < 6):
         previous = local.replace(day=1) - timedelta(days=1)
         return f"{previous.year:04d}-{previous.month:02d}"
@@ -37,5 +44,5 @@ def valid_dispatch_key(key: str, now: datetime) -> bool:
         return False
     if not 1 <= month <= 12:
         return False
-    local = now.astimezone(JERUSALEM)
+    local = _aware(now).astimezone(JERUSALEM)
     return (year, month) <= (local.year, local.month)
