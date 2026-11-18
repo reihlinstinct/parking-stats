@@ -9,6 +9,11 @@ only through the protected path (restore / hold-clear), never by the publisher,
 and carries no private source SHAs. Blocking applies only while the marker
 exists: clearance fully lifts the block.
 
+Privacy scope, stated narrowly: the marker note is scanned with the repository
+privacy rules (phone and raw-export key/column patterns). Those rules do not
+detect municipal case-identifier-like strings, so the note must stay a fixed
+generic owner message - never source-derived or per-incident text.
+
 Run boundary: the publisher records the public main SHA at run start and
 re-reads it immediately before publishing. If main moved - for example a
 protected-path restore or hold-clear landed - the run aborts rather than
@@ -51,6 +56,10 @@ def read_marker(public_root: Path) -> dict[str, object] | None:
         raw = path.read_text(encoding="utf-8")
     except OSError:
         raise UnionError("hold_marker_read") from None
+    except UnicodeDecodeError:
+        # Invalid UTF-8 fails closed with the generic message; an uncaught
+        # decode traceback could leak the marker path into public logs.
+        raise UnionError("hold_marker_schema") from None
     if len(raw) > 4096:
         raise UnionError("hold_marker_schema")
     try:

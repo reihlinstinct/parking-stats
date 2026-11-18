@@ -125,6 +125,34 @@ class HoldMarkerTests(unittest.TestCase):
                 require_publish_allowed(Path(tmp))
             self.assertEqual(ctx.exception.args, ("hold_active",))
 
+    def test_invalid_utf8_marker_fails_closed_without_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / HOLD_MARKER
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"\xff\xfe not utf-8")
+            with self.assertRaises(UnionError) as ctx:
+                require_publish_allowed(Path(tmp))
+            self.assertEqual(ctx.exception.args, ("hold_marker_schema",))
+            import io
+            from contextlib import redirect_stdout
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = main(["check-hold", "--public-root", tmp])
+            self.assertEqual(code, 1)
+            self.assertEqual(out.getvalue().strip(), BLOCKED_MESSAGE)
+
+    def test_case_identifier_like_note_is_not_privacy_caught(self):
+        # Pins the narrowed privacy claim: the scanner's rules do not detect
+        # municipal case-identifier-like strings, so such a note blocks as
+        # hold_active, not hold_marker_privacy. The marker note must stay a
+        # fixed generic owner message; the scan is not its only safeguard.
+        with tempfile.TemporaryDirectory() as tmp:
+            write_marker(Path(tmp), GOOD_MARKER | {"note": "see case 106/1234567"})
+            with self.assertRaises(UnionError) as ctx:
+                require_publish_allowed(Path(tmp))
+            self.assertEqual(ctx.exception.args, ("hold_active",))
+
     def test_oversized_marker_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             write_marker(Path(tmp), json.dumps(GOOD_MARKER) + " " * 5000)
