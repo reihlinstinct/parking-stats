@@ -102,7 +102,13 @@ the public Actions API client-side and marks itself stale once that success is
 more than 48 hours old - the design cadence is a build every 6 hours, so 48
 hours means eight consecutive missed runs - which needs no rebuild and never
 shows stale merely because the ledger was unchanged. If the API is unreachable
-the page shows freshness unknown, never fresh. The data-through date is
+the page shows freshness unknown, never fresh. A run that exits on the hold
+marker does not count as a healthy publish cycle and does not refresh the
+last-success signal; while a hold is active the hold state takes precedence
+over the stale indicator. GitHub auto-disables a scheduled workflow after 60
+days without repository activity: re-enabling is an owner step, and until then
+the aging last-success makes the page show stale, which is the intended
+signal. The data-through date is
 displayed separately as information, not a freshness claim. The 6-hour cadence
 is the design schedule, not an enabled one. Tests: a fixture with last-success
 older than 48 hours renders stale with no successful build; a no-op success
@@ -165,45 +171,12 @@ aliases, overlap with historical data, strict payload limits and no combined sum
 Regression tests seed forbidden contact strings/raw keys into every output path
 and assert zero public writes. Fail on unexpected carrier/path or plate threshold.
 Test no-op, stale source, concurrent push, provider failure and Pages trigger.
-Four named acceptance tests are required: (1) revoked-token: a revoked or
-expired credential fails closed - the previous public revision stays
-byte-identical, the public output is the fixed generic error, and the test
-asserts the generic failure and exit code, not alert delivery, which depends on
-external notification routes; (2) concurrency: enforced by a workflow-level
-Actions concurrency group with cancel-in-progress disabled - at most one
-active run and one pending run at a time, and a newer trigger replaces the
-older pending run: latest-pending-wins is safe because the pending run
-re-reads the latest source and destination when it starts, publishes only when
-the aggregates differ, and is otherwise a no-op. No two runs ever write
-concurrently. Restore and hold-clear land as ordinary protected-path commits,
-and the publisher re-reads main immediately before publishing and aborts on
-any unexpected diff, so a mid-run restore or clearance cannot be overwritten.
-The Pages deployment group with cancel-in-progress enabled cancels only
-superseded deployments of newer main content; during a hold the publisher
-pushes nothing, and any other main push already contains the restored
-aggregates, so a cancelled intermediate deployment never resurrects bad data; (3) rollback: a failed publish leaves the previous public
-revision byte-identical, never partial, and if a bad revision reaches the live
-page, the last-known-good aggregates are restored through the same protected
-path (normal data PR or the approved bounded automation) with Pages deploying
-that exact restored revision, and place a hold: a hold
-marker file in PUBLIC parking-stats, committed by the restore through the same
-protected path, blocks ALL publication - scheduled or manual dispatch - while
-it exists; the publisher checks the marker first, before decrypting or
-publishing, and exits with the generic message. Only the owner's explicit
-clearance, merged through the protected path, removes it, and a descendant
-revision carrying the same bad data is blocked like any other. The publisher
-records the last-known-good aggregate commit SHA privately after each
-successful Pages deployment of that exact commit, and restore uses that
-recorded SHA; during the hold the restored page keeps its original timestamps
-and source date with a visible banner that publication is paused by owner
-hold. Tests assert: restored bytes are byte-identical to the last-known-good,
-the Pages deployment SHA equals the restore commit, a scheduled run AND a
-manual dispatch during the hold publish nothing, and a descendant revision
-with the same bad data stays blocked; (4) stale-source display: across consecutive
-failed scheduled runs the page still marks itself stale from a last-success
-older than 48 hours, an unchanged ledger never shows stale while runs succeed
-as no-ops, and the indicator never depends on a successful rebuild and never
-looks fresh.
+Four named acceptance tests are required, each with concrete synthetic fixtures, actions and assertions:
+
+1. **revoked-token** - fixture: a run with a deliberately revoked scoped token in a disposable environment. Assert: non-zero exit; the public revision's tree hash is identical before and after; the public log contains only the fixed generic error string. Alert delivery is not asserted, since delivery depends on external notification routes.
+2. **concurrency and run boundaries** - fixture: two runs triggered on synthetic differing inputs under the workflow-level Actions concurrency group (cancel-in-progress disabled; at most one active run and one pending run; a newer trigger replaces the older pending run - latest-pending-wins is safe because the pending run re-reads the latest source and destination when it starts). Assert: exactly one publish commit, the second run no-ops, and no two runs ever write concurrently. Boundary fixture: a protected-path commit (restore or hold-clear) landing mid-run. Assert: the run's recorded start-of-run main SHA no longer matches at publish time, so it aborts without rebasing or force-pushing. The Pages deployment group with cancel-in-progress enabled cancels only superseded deployments of newer main content; during a hold the publisher pushes nothing, and any other main push already contains the restored aggregates, so a cancelled intermediate deployment never resurrects bad data.
+3. **rollback and hold** - fixture: seeded bad synthetic aggregates that went live in a disposable repository. Action: restore the last-known-good aggregates through the same protected path (normal data PR or the approved bounded automation) with Pages deploying that exact restored revision, and place a hold - a hold marker file in PUBLIC parking-stats, committed by the restore through the same protected path, blocks ALL publication, scheduled or manual dispatch, while it exists; the publisher checks the marker at filter start, again inside the publish job, and immediately before any write, exiting with the generic message. Restoring also closes any open publisher data PR, and hold clearance merges only after no stale publisher PR remains open. Only the owner's explicit clearance, merged through the protected path, lifts the hold flag. The marker also carries the known-bad source revisions: clearance lifts the hold, but the publisher permanently refuses aggregates derived from any listed revision. Last-known-good is the most recent public aggregate commit whose post-deploy verification PASSED (live bytes match the validated aggregates, counts and source dates compared, pixels inspected; a deploy later found bad is never last-known-good); the record is kept by the operator through the owner's existing private route or designated directly by the owner, never written by a pipeline credential, so the publisher cannot certify itself. The restored page stays byte-identical to that commit; the paused state is shown client-side from the public hold marker, not by editing the restored bytes. Assert: restored bytes are byte-identical to the last-known-good; the Pages deployment SHA equals the restore commit; a scheduled run AND a manual dispatch during the hold publish nothing; an open publisher PR cannot merge during the hold; and a descendant revision carrying listed bad data stays blocked after clearance.
+4. **stale-source display** - fixture: the page served with the public Actions API stubbed. Assert: with last-success stubbed 49 hours old the page marks itself stale with no rebuild involved; with a no-op success stubbed 1 hour old on unchanged aggregates it shows no stale indicator; with the API stubbed unreachable it shows freshness unknown, never fresh; and across consecutive failed scheduled runs the stale display holds.
 Run unit+functional container tests and independent exact-head review.
 
 Before shipping, inspect desktop and mobile pixels for source labels, historical
@@ -458,13 +431,22 @@ both source and destination after a transport conflict. No force push or branch
 protection bypass. Use ordinary data PR checks/review or an explicitly approved
 bounded automation route; public contents write is separate from source read.
 
+Run-boundary checks: the publisher records the public main SHA at run start and
+re-reads main immediately before publishing; if main moved - for example a
+protected-path restore or hold-clear landed - it aborts rather than rebasing,
+and a later run starts fresh. Pushes are never forced. A publisher data PR
+merges only with a fresh hold-absent status check, and an active hold closes
+any open publisher data PR.
+
 Credential and job isolation: the filter job holds the decryption identity and
 the private-read token and has NO public-write credential; the publish job holds
 the scoped public writer and no decryption or private-read secret. Only the
 aggregate artifact crosses from filter to publish: it is uploaded only after the
-schema, small-cell and privacy gates pass, with one-day retention and no public
-access, and the publish job revalidates it against the same strict schema
-before any write.
+schema, small-cell and privacy gates pass, with one-day retention; because the
+repository is public the artifact is downloadable, which is acceptable only
+because the gates guarantee it contains nothing but publishable aggregates, so
+nothing sensitive may ever reach it - and the publish job revalidates it
+against the same strict schema before any write.
 Public main stays protected with required review; the publisher workflow file,
 the filter/publish code and the public output allowlist are CODEOWNERS-owned
 sensitive paths that require owner review on every change.
@@ -518,9 +500,12 @@ The public refresh never depends on this job succeeding and does not wait for it
 Schedule the private job once per calendar month, on day one, using a documented
 UTC schedule that is also day one in Asia/Jerusalem. No push/PR triggers, matrix,
 recurring retries, or private build/test/publish chain. The month key is YYYY-MM
-in Asia/Jerusalem of the intended scheduled month; a late, retried or manually
-dispatched run uses its intended month key, never the wall-clock month at
-execution. The key is idempotent: if that month's committed encrypted log
+in Asia/Jerusalem. A scheduled run derives it from its start time in
+Asia/Jerusalem on day one of the month; a run starting on day two before 06:00
+local derives the previous month as late-start grace, and any other start day
+exits and reports rather than guessing. A manual dispatch takes an explicit
+month key input and uses exactly that; the input must match YYYY-MM and must
+not be a future month, and an invalid key is rejected before any work. The key is idempotent: if that month's committed encrypted log
 exists, or a data PR carrying that month key is already open, exit without
 another file or duplicate PR; resume or reuse the open PR instead. A manual retry, if separately invoked by the
 authorized owner, must enforce the same key and cannot create a duplicate
@@ -538,7 +523,11 @@ date, which carry no private values. The job does not decrypt: it packages the
 ciphertext with its manifests and hashes into one additive encrypted monthly
 log, consistent with never copying the decryption secret or the private-read
 token into this job, and envelope validation is hash and format only, not
-decryption. No plaintext exists anywhere in the job - not in memory, on disk,
+decryption. Hash and format checks cannot establish authenticity or
+decryptability: the job verifies each packaged ciphertext's recorded hash, any
+mismatch fails the run closed through the failure alert route, and actual
+decryptability is proven only by the separate owner-approved restore
+acceptance, which this job does not claim. No plaintext exists anywhere in the job - not in memory, on disk,
 in artifacts, caches or logs - and the workspace is wiped on every exit path.
 Only authenticated ciphertext is committed or recorded. A default-token data PR
 does not trigger checks, so the monthly PR is opened by the existing approved
@@ -567,6 +556,7 @@ minutes and the expected actual job duration; choose an explicit small monthly
 minutes ceiling within the existing allowance. Do not buy minutes, enable an
 unbounded overage, or claim the five-minute timeout itself proves budget fit.
 If the allowance is exhausted or the job is unavailable, skip/report privately
-without paid fallback or blocking the PUBLIC refresh. First successful run must
+without paid fallback or blocking the PUBLIC refresh. A billing-blocked private
+Actions state is treated the same way: skip and report privately, never bypass. First successful run must
 record actual minutes and ciphertext-only diff. Subsequent calendar runs produce
 at most one new monthly log; failed runs leave prior logs unchanged.
