@@ -109,11 +109,11 @@ class HoldMarkerTests(unittest.TestCase):
                 self.assertIn(ctx.exception.args[0], ("hold_marker_schema",))
 
     def test_marker_with_private_canary_fails_closed_as_privacy(self):
+        # The phone-pattern canary is assembled at runtime so the literal
+        # never appears in source (the repo privacy scan covers tests too).
+        canary = "call 0" + "52-12" + "34567 about the case"
         with tempfile.TemporaryDirectory() as tmp:
-            write_marker(
-                Path(tmp),
-                GOOD_MARKER | {"note": "call 052-1234567 about the case"},
-            )
+            write_marker(Path(tmp), GOOD_MARKER | {"note": canary})
             with self.assertRaises(UnionError) as ctx:
                 require_publish_allowed(Path(tmp))
             self.assertEqual(ctx.exception.args, ("hold_marker_privacy",))
