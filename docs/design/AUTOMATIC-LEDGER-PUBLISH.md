@@ -102,10 +102,12 @@ the public Actions API client-side and marks itself stale once that success is
 more than 48 hours old - the design cadence is a build every 6 hours, so 48
 hours means eight consecutive missed runs - which needs no rebuild and never
 shows stale merely because the ledger was unchanged. If the API is unreachable
-the page shows freshness unknown, never fresh. A run that exits on the hold
-marker does not count as a healthy publish cycle and does not refresh the
-last-success signal; while a hold is active the hold state takes precedence
-over the stale indicator. GitHub auto-disables a scheduled workflow after 60
+the page shows freshness unknown, never fresh. The page reads the public
+Actions API unauthenticated, with no token: a rate-limited, error, or
+missing-success response all show freshness unknown, never fresh. A run that exits on the hold
+marker or aborts on a moved main does not count as a healthy publish cycle and
+does not refresh the last-success signal; while a hold is active the hold
+state takes precedence over the stale indicator. GitHub auto-disables a scheduled workflow after 60
 days without repository activity: re-enabling is an owner step, and until then
 the aging last-success makes the page show stale, which is the intended
 signal. The data-through date is
@@ -171,12 +173,13 @@ aliases, overlap with historical data, strict payload limits and no combined sum
 Regression tests seed forbidden contact strings/raw keys into every output path
 and assert zero public writes. Fail on unexpected carrier/path or plate threshold.
 Test no-op, stale source, concurrent push, provider failure and Pages trigger.
-Four named acceptance tests are required, each with concrete synthetic fixtures, actions and assertions:
+Five named acceptance tests are required, each with concrete synthetic fixtures, actions and assertions:
 
 1. **revoked-token** - fixture: a run with a deliberately revoked scoped token in a disposable environment. Assert: non-zero exit; the public revision's tree hash is identical before and after; the public log contains only the fixed generic error string. Alert delivery is not asserted, since delivery depends on external notification routes.
-2. **concurrency and run boundaries** - fixture: two runs triggered on synthetic differing inputs under the workflow-level Actions concurrency group (cancel-in-progress disabled; at most one active run and one pending run; a newer trigger replaces the older pending run - latest-pending-wins is safe because the pending run re-reads the latest source and destination when it starts). Assert: exactly one publish commit, the second run no-ops, and no two runs ever write concurrently. Boundary fixture: a protected-path commit (restore or hold-clear) landing mid-run. Assert: the run's recorded start-of-run main SHA no longer matches at publish time, so it aborts without rebasing or force-pushing. The Pages deployment group with cancel-in-progress enabled cancels only superseded deployments of newer main content; during a hold the publisher pushes nothing, and any other main push already contains the restored aggregates, so a cancelled intermediate deployment never resurrects bad data.
-3. **rollback and hold** - fixture: seeded bad synthetic aggregates that went live in a disposable repository. Action: restore the last-known-good aggregates through the same protected path (normal data PR or the approved bounded automation) with Pages deploying that exact restored revision, and place a hold - a hold marker file in PUBLIC parking-stats, committed by the restore through the same protected path, blocks ALL publication, scheduled or manual dispatch, while it exists; the publisher checks the marker at filter start, again inside the publish job, and immediately before any write, exiting with the generic message. Restoring also closes any open publisher data PR, and hold clearance merges only after no stale publisher PR remains open. Only the owner's explicit clearance, merged through the protected path, lifts the hold flag. The marker also carries the known-bad source revisions: clearance lifts the hold, but the publisher permanently refuses aggregates derived from any listed revision. Last-known-good is the most recent public aggregate commit whose post-deploy verification PASSED (live bytes match the validated aggregates, counts and source dates compared, pixels inspected; a deploy later found bad is never last-known-good); the record is kept by the operator through the owner's existing private route or designated directly by the owner, never written by a pipeline credential, so the publisher cannot certify itself. The restored page stays byte-identical to that commit; the paused state is shown client-side from the public hold marker, not by editing the restored bytes. Assert: restored bytes are byte-identical to the last-known-good; the Pages deployment SHA equals the restore commit; a scheduled run AND a manual dispatch during the hold publish nothing; an open publisher PR cannot merge during the hold; and a descendant revision carrying listed bad data stays blocked after clearance.
-4. **stale-source display** - fixture: the page served with the public Actions API stubbed. Assert: with last-success stubbed 49 hours old the page marks itself stale with no rebuild involved; with a no-op success stubbed 1 hour old on unchanged aggregates it shows no stale indicator; with the API stubbed unreachable it shows freshness unknown, never fresh; and across consecutive failed scheduled runs the stale display holds.
+2. **concurrency and run boundaries** - fixture: two runs triggered on synthetic differing inputs under the workflow-level Actions concurrency group (cancel-in-progress disabled; at most one active run and one pending run; a newer trigger replaces the older pending run - latest-pending-wins is safe because the pending run re-reads the latest source and destination when it starts). Assert: exactly one publish commit, the second run no-ops, and no two runs ever write concurrently; because the surviving run re-reads the latest source when it starts, the published aggregates equal the newer trigger's source. Boundary fixture: a protected-path commit (restore or hold-clear) landing mid-run. Assert: the run's recorded start-of-run main SHA no longer matches at publish time, so it aborts without rebasing or force-pushing. The Pages deployment group with cancel-in-progress enabled cancels only superseded deployments of newer main content; during a hold the publisher pushes nothing, and any other main push already contains the restored aggregates, so a cancelled intermediate deployment never resurrects bad data.
+3. **rollback and hold** - fixture: seeded bad synthetic aggregates that went live in a disposable repository. Action: restore the last-known-good aggregates through the same protected path (normal data PR or the approved bounded automation) with Pages deploying that exact restored revision, and place a hold - a hold marker file in PUBLIC parking-stats, committed by the restore through the same protected path, blocks ALL publication, scheduled or manual dispatch, while it exists; the publisher checks the marker at filter start, again inside the publish job, and immediately before any write, exiting with the generic message. The restore actor - the owner or the owner-approved bounded restore automation acting with the protected-path credential, never the publisher credential - also closes any open publisher data PR, and hold clearance merges only after no stale publisher PR remains open. Only the owner's explicit clearance, merged through the protected path, lifts the hold flag. Blocking applies only while the marker exists: the marker carries no private source SHAs, clearance fully lifts the block, and a later revision carrying the same bad data is handled by a new hold, not by the publisher. Last-known-good is the most recent public aggregate commit whose post-deploy verification PASSED (live bytes match the validated aggregates, counts and source dates compared, pixels inspected; a deploy later found bad is never last-known-good); the record is kept by the operator through the owner's existing private route or designated directly by the owner, never written by a pipeline credential, so the publisher cannot certify itself. The restored page stays byte-identical to that commit; the paused state is shown client-side from the public hold marker, not by editing the restored bytes. Assert: restored bytes are byte-identical to the last-known-good; the Pages deployment SHA equals the restore commit; a scheduled run AND a manual dispatch during the hold publish nothing; an open publisher PR cannot merge during the hold; a run exiting on the hold marker or aborting on moved main neither concludes success nor refreshes the last-success signal; and after clearance a scheduled run publishes again normally.
+4. **stale-source display** - fixture: the page served with the public Actions API stubbed. Assert: with last-success stubbed 49 hours old the page marks itself stale with no rebuild involved; with a no-op success stubbed 1 hour old on unchanged aggregates it shows no stale indicator; with the API stubbed unreachable it shows freshness unknown, never fresh; and across consecutive failed scheduled runs the stale display holds; with the hold marker present the page shows the paused state regardless of last-success age.
+5. **monthly snapshot month** - fixture: the private monthly job started on day two at 05:00 Asia/Jerusalem (a delayed schedule). Assert: it derives the same previous-month key as a day-one start; a start on any later day exits without work and reports privately; a manual dispatch with a malformed or future month key is rejected before any work; and a second run for an already-recorded month no-ops.
 Run unit+functional container tests and independent exact-head review.
 
 Before shipping, inspect desktop and mobile pixels for source labels, historical
@@ -433,10 +436,14 @@ bounded automation route; public contents write is separate from source read.
 
 Run-boundary checks: the publisher records the public main SHA at run start and
 re-reads main immediately before publishing; if main moved - for example a
-protected-path restore or hold-clear landed - it aborts rather than rebasing,
-and a later run starts fresh. Pushes are never forced. A publisher data PR
-merges only with a fresh hold-absent status check, and an active hold closes
-any open publisher data PR.
+protected-path restore or hold-clear landed - it aborts rather than rebasing.
+An abort is not a healthy publish cycle: it does not refresh the last-success
+signal, it is reported privately through the failure alert route, and recovery
+is simply the next scheduled run starting fresh from the new main. Pushes are
+never forced. A publisher data PR merges only through a merge queue or a
+required up-to-date branch whose hold-absent status check runs at merge time,
+so a hold landing after an earlier green check still blocks the merge, and an
+active hold closes any open publisher data PR.
 
 Credential and job isolation: the filter job holds the decryption identity and
 the private-read token and has NO public-write credential; the publish job holds
@@ -500,10 +507,12 @@ The public refresh never depends on this job succeeding and does not wait for it
 Schedule the private job once per calendar month, on day one, using a documented
 UTC schedule that is also day one in Asia/Jerusalem. No push/PR triggers, matrix,
 recurring retries, or private build/test/publish chain. The month key is YYYY-MM
-in Asia/Jerusalem. A scheduled run derives it from its start time in
-Asia/Jerusalem on day one of the month; a run starting on day two before 06:00
-local derives the previous month as late-start grace, and any other start day
-exits and reports rather than guessing. A manual dispatch takes an explicit
+in Asia/Jerusalem and names the snapshot month: the job snapshots the calendar
+month that just completed. A scheduled run starting on day one derives the
+previous month (the just-completed month); a delayed run starting on day two
+before 06:00 local is the late start of that same monthly run and derives the
+same previous month; any other start day exits and reports rather than
+guessing. A manual dispatch takes an explicit
 month key input and uses exactly that; the input must match YYYY-MM and must
 not be a future month, and an invalid key is rejected before any work. The key is idempotent: if that month's committed encrypted log
 exists, or a data PR carrying that month key is already open, exit without
@@ -529,7 +538,7 @@ mismatch fails the run closed through the failure alert route, and actual
 decryptability is proven only by the separate owner-approved restore
 acceptance, which this job does not claim. No plaintext exists anywhere in the job - not in memory, on disk,
 in artifacts, caches or logs - and the workspace is wiped on every exit path.
-Only authenticated ciphertext is committed or recorded. A default-token data PR
+Only the ciphertext envelope is committed or recorded; the job validates its format and hash, which does not prove the authenticity or decryptability of the inner ciphertext. A default-token data PR
 does not trigger checks, so the monthly PR is opened by the existing approved
 identity or its checks are run by an owner trigger. Recording is atomic: the new encrypted log, its SHA256 and the
 private index entry land in one commit through ordinary protected-branch rules,
@@ -543,7 +552,8 @@ public repository. Never copy either secret into the private monthly job. Keep
 source provenance and original timestamps inside the ciphertext. No plaintext
 artifact/cache/log, no public output, no dashboard update, no destructive cleanup
 or rewrite of historical encrypted logs. Record the cipher hash and validate the
-produced envelope before committing through ordinary protected-branch rules.
+produced envelope's format and hash before committing through ordinary
+protected-branch rules.
 
 Use the existing private repository identity with the minimum approved contents
 write route, not a widened public credential. Branch protections are not waived;
@@ -557,6 +567,10 @@ minutes ceiling within the existing allowance. Do not buy minutes, enable an
 unbounded overage, or claim the five-minute timeout itself proves budget fit.
 If the allowance is exhausted or the job is unavailable, skip/report privately
 without paid fallback or blocking the PUBLIC refresh. A billing-blocked private
-Actions state is treated the same way: skip and report privately, never bypass. First successful run must
+Actions state is treated the same way: skip and report privately, never bypass.
+If the monthly data PR was already created but its checks cannot run because
+private Actions are billing-blocked, the PR stays open and unmerged - never
+bypassed - and the next run reuses the same stable month-key branch instead of
+opening a duplicate. First successful run must
 record actual minutes and ciphertext-only diff. Subsequent calendar runs produce
 at most one new monthly log; failed runs leave prior logs unchanged.
