@@ -195,6 +195,116 @@ class PrivateFetchTests(unittest.TestCase):
                     MOD.git(root, ["fetch"], {}, root, 10, "fetch")
             child.wait.assert_called_once()
 
+    def test_many_fast_git_calls_do_not_pay_a_full_polling_interval(self):
+        # 800 synthetic reports need 1,600 ls-tree/show calls. Previously the
+        # unconditional 0.2s sleep alone exhausted the shared 300s deadline.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clock = [0.0]
+            children = []
+
+            def launch(*args, **kwargs):
+                child = MagicMock()
+                child.pid = 12345
+                child.returncode = 0
+                child.poll.side_effect = [None, 0]
+
+                def wait(timeout=None):
+                    if timeout is not None:
+                        self.assertGreater(timeout, 0)
+                        self.assertLessEqual(timeout, 0.2)
+                        clock[0] += (
+                            0.001  # Fast child completion, not the full timeout.
+                        )
+                    return 0
+
+                child.wait.side_effect = wait
+                children.append(child)
+                return child
+
+            def sleep(seconds):
+                clock[0] += seconds
+
+            with (
+                patch.object(MOD.time, "monotonic", side_effect=lambda: clock[0]),
+                patch.object(MOD.time, "sleep", side_effect=sleep) as sleeping,
+                patch.object(MOD.subprocess, "Popen", side_effect=launch),
+                patch.object(MOD.os, "killpg") as cleanup,
+            ):
+                for _ in range(1600):
+                    MOD.git(root, ["ls-tree"], {}, root, 300, "checkout")
+                sleeping.assert_not_called()
+            self.assertAlmostEqual(clock[0], 1.6)
+            self.assertEqual(cleanup.call_count, 1600)
+            for child in children:
+                self.assertEqual(child.wait.call_count, 2)  # Timed wait, then reap.
+                self.assertEqual(child.wait.call_args_list[-1].args, ())
+                self.assertEqual(child.wait.call_args_list[-1].kwargs, {})
+
+    def test_wait_is_capped_by_remaining_deadline_and_timeout_still_cleans_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clock = [299.95]
+            child = MagicMock()
+            child.pid = 12345
+            child.poll.return_value = None
+
+            def wait(timeout=None):
+                if timeout is not None:
+                    self.assertAlmostEqual(timeout, 0.05)
+                    clock[0] = 300
+                    raise MOD.subprocess.TimeoutExpired("synthetic", timeout)
+                return 0
+
+            child.wait.side_effect = wait
+            with (
+                patch.object(MOD.time, "monotonic", side_effect=lambda: clock[0]),
+                patch.object(MOD.subprocess, "Popen", return_value=child),
+                patch.object(MOD.os, "killpg") as cleanup,
+            ):
+                with self.assertRaises(MOD.FetchError) as error:
+                    MOD.git(root, ["show"], {}, root, 300, "checkout")
+            self.assertEqual(
+                (error.exception.stage, error.exception.code), ("checkout", "timeout")
+            )
+            cleanup.assert_called_once_with(child.pid, MOD.signal.SIGKILL)
+            self.assertEqual(child.wait.call_count, 2)
+
+    def test_output_size_is_checked_after_a_fast_wait_before_returning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = MagicMock()
+            child.pid = 12345
+            child.returncode = 0
+            child.poll.side_effect = [None, 0]
+
+            def launch(*args, **kwargs):
+                def wait(timeout=None):
+                    if timeout is not None:
+                        kwargs["stdout"].write(b"1234")
+                    return 0
+
+                child.wait.side_effect = wait
+                return child
+
+            with (
+                patch.object(MOD.subprocess, "Popen", side_effect=launch),
+                patch.object(MOD.os, "killpg") as cleanup,
+            ):
+                with self.assertRaises(MOD.FetchError) as error:
+                    MOD.git(
+                        root,
+                        ["show"],
+                        {},
+                        root,
+                        float("inf"),
+                        "checkout",
+                        capture=True,
+                        max_output=3,
+                    )
+            self.assertEqual(error.exception.code, "size_limit")
+            cleanup.assert_called_once_with(child.pid, MOD.signal.SIGKILL)
+
     def test_nonzero_has_fixed_code(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

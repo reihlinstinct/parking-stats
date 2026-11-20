@@ -121,7 +121,12 @@ def git(path, args, env, root, deadline, stage, capture=False, max_output=1024):
                 check_budget(root, deadline, stage)
                 if output.tell() > max_output:
                     raise FetchError(stage, "size_limit")
-                time.sleep(min(0.2, max(0, deadline - time.monotonic())))
+                # Return as soon as Git exits, without charging every small
+                # ls-tree/show call a full polling interval against the budget.
+                try:
+                    process.wait(timeout=min(0.2, max(0, deadline - time.monotonic())))
+                except subprocess.TimeoutExpired:
+                    pass
             check_budget(root, deadline, stage)
             if process.returncode:
                 raise FetchError(stage, "nonzero_exit")
